@@ -13,6 +13,7 @@ type ReportDetailTocProps = {
 
 export function ReportDetailToc({ sectionLinks }: ReportDetailTocProps) {
   const [activeId, setActiveId] = useState(sectionLinks[0]?.id ?? "");
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
   const itemRefs = useRef<Record<string, HTMLAnchorElement | null>>({});
 
   function handleNavigate(event: React.MouseEvent<HTMLAnchorElement>, id: string) {
@@ -34,6 +35,7 @@ export function ReportDetailToc({ sectionLinks }: ReportDetailTocProps) {
 
     window.history.replaceState(null, "", `#${id}`);
     setActiveId(id);
+    setIsMobileOpen(false);
   }
 
   useEffect(() => {
@@ -109,36 +111,75 @@ export function ReportDetailToc({ sectionLinks }: ReportDetailTocProps) {
     });
   }, [activeId]);
 
-  return (
-    <div className="glass sticky top-3 z-30 rounded-[1.5rem] p-3 sm:top-4 sm:rounded-[1.7rem] sm:p-4 xl:top-6 xl:rounded-[2rem] xl:p-5">
-      <div className="flex items-center justify-between gap-3 xl:block">
-        <p className="section-title shrink-0">快捷导航</p>
-        <p className="text-[11px] text-stone-500 xl:hidden">左右滑动查看全部模块</p>
-      </div>
-      <nav className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1 xl:mx-0 xl:mt-4 xl:flex-col xl:overflow-visible xl:px-0 xl:pb-0">
-        {sectionLinks.map((item) => {
-          const isActive = item.id === activeId;
+  function renderLinks(mode: "mobile" | "desktop") {
+    return sectionLinks.map((item) => {
+      const isActive = item.id === activeId;
 
-          return (
-            <a
-              key={item.id}
-              ref={(node) => {
-                itemRefs.current[item.id] = node;
-              }}
-              href={`#${item.id}`}
-              aria-current={isActive ? "location" : undefined}
-              onClick={(event) => handleNavigate(event, item.id)}
-              className={`shrink-0 whitespace-nowrap rounded-full px-3 py-2 text-xs transition sm:text-sm xl:rounded-[1.1rem] xl:px-3 xl:py-3 ${
-                isActive
-                  ? "border border-emerald-700/20 bg-[rgba(13,122,95,0.12)] text-emerald-900 shadow-[0_10px_30px_rgba(13,122,95,0.10)]"
-                  : "border border-transparent text-stone-700 hover:border-stone-200/80 hover:bg-white/70 hover:text-stone-900"
-              }`}
+      return (
+        <a
+          key={`${mode}-${item.id}`}
+          ref={(node) => {
+            itemRefs.current[`${mode}:${item.id}`] = node;
+            if (mode === "desktop") {
+              itemRefs.current[item.id] = node;
+            }
+          }}
+          href={`#${item.id}`}
+          aria-current={isActive ? "location" : undefined}
+          onClick={(event) => handleNavigate(event, item.id)}
+          className={`transition ${
+            mode === "mobile"
+              ? `block rounded-[1rem] px-3 py-2.5 text-sm ${
+                  isActive
+                    ? "border border-emerald-700/20 bg-[rgba(13,122,95,0.12)] text-emerald-900 shadow-[0_10px_30px_rgba(13,122,95,0.10)]"
+                    : "border border-transparent text-stone-700 hover:border-stone-200/80 hover:bg-white/70 hover:text-stone-900"
+                }`
+              : `rounded-[1.1rem] px-3 py-3 text-sm ${
+                  isActive
+                    ? "border border-emerald-700/20 bg-[rgba(13,122,95,0.12)] text-emerald-900 shadow-[0_10px_30px_rgba(13,122,95,0.10)]"
+                    : "border border-transparent text-stone-700 hover:border-stone-200/80 hover:bg-white/70 hover:text-stone-900"
+                }`
+          }`}
+        >
+          {item.label}
+        </a>
+      );
+    });
+  }
+
+  return (
+    <>
+      <div className="fixed top-1/2 left-3 z-40 -translate-y-1/2 xl:hidden">
+        <div className="glass flex items-center gap-2 rounded-[1.4rem] p-2 shadow-[0_18px_40px_rgba(41,37,36,0.18)]">
+          <button
+            type="button"
+            aria-expanded={isMobileOpen}
+            aria-controls="report-detail-mobile-toc"
+            onClick={() => {
+              setIsMobileOpen((current) => !current);
+            }}
+            className="flex min-h-11 items-center justify-center rounded-[1rem] bg-[rgba(13,122,95,0.12)] px-3 text-xs font-medium tracking-[0.12em] text-emerald-900 uppercase"
+          >
+            目录
+          </button>
+          {isMobileOpen ? (
+            <div
+              id="report-detail-mobile-toc"
+              className="max-h-[70vh] w-[220px] overflow-y-auto rounded-[1.2rem] border border-stone-200/80 bg-[var(--panel-strong)] p-2"
             >
-              {item.label}
-            </a>
-          );
-        })}
-      </nav>
-    </div>
+              <p className="px-2 py-1 text-[11px] text-stone-500">文章导航</p>
+              <nav className="mt-1 flex flex-col gap-1">{renderLinks("mobile")}</nav>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="hidden xl:block">
+        <div className="glass sticky top-6 z-30 rounded-[2rem] p-5">
+          <p className="section-title">快捷导航</p>
+          <nav className="mt-4 flex flex-col gap-2">{renderLinks("desktop")}</nav>
+        </div>
+      </div>
+    </>
   );
 }
