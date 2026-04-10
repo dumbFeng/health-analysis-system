@@ -97,7 +97,7 @@ function DetailSection({
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="glass scroll-mt-24 rounded-[2rem] p-6 sm:p-8">
+    <section id={id} className="glass scroll-mt-32 rounded-[2rem] p-6 sm:scroll-mt-36 sm:p-8 xl:scroll-mt-24">
       <p className="section-title">{title}</p>
       <div className="mt-5">{children}</div>
     </section>
