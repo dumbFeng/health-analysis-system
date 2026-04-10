@@ -1,0 +1,88 @@
+import { NextResponse } from "next/server";
+import {
+  createStoredReport,
+  listReports,
+  toPublicReport,
+} from "@/lib/report-store";
+import { enqueueReportAnalysis } from "@/lib/ai/health-report-analyzer";
+import { logger } from "@/lib/logger";
+import { uploadQueue } from "@/lib/queue/report-queues";
+
+export const runtime = "nodejs";
+
+export async function GET() {
+  const reports = await listReports();
+  await logger.debug("查询报告列表", {
+    count: reports.length,
+  });
+  return NextResponse.json({ reports: reports.map(toPublicReport) });
+}
+
+export async function POST(request: Request) {
+  const formData = await request.formData();
+  const file = formData.get("file");
+
+  if (!(file instanceof File)) {
+    await logger.warn("上传报告失败：缺少文件", {});
+    return NextResponse.json({ error: "请上传 PDF 文件。" }, { status: 400 });
+  }
+
+  const isPdf =
+    file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+
+  if (!isPdf) {
+    await logger.warn("上传报告失败：文件不是 PDF", {
+      fileName: file.name,
+      mimeType: file.type,
+    });
+    return NextResponse.json(
+      { error: "当前仅支持 PDF 体检报告。" },
+      { status: 400 },
+    );
+  }
+
+  if (uploadQueue.isFull()) {
+    await logger.warn("上传报告失败：上传队列已满", {
+      fileName: file.name,
+      queue: uploadQueue.getStats(),
+    });
+    return NextResponse.json(
+      { error: "当前上传任务较多，请稍后再试。" },
+      { status: 429 },
+    );
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const report = await uploadQueue.enqueue(`upload:${file.name}:${Date.now()}`, async () => {
+    await logger.info("上传任务开始执行", {
+      fileName: file.name,
+      fileSize: file.size,
+      queue: uploadQueue.getStats(),
+    });
+
+    const createdReport = await createStoredReport({
+      fileName: file.name,
+      mimeType: file.type || "application/pdf",
+      fileSize: file.size,
+      bytes,
+    });
+
+    await logger.info("上传任务执行完成", {
+      reportId: createdReport.id,
+      fileName: file.name,
+      queue: uploadQueue.getStats(),
+    });
+
+    return createdReport;
+  });
+
+  await logger.info("报告上传成功", {
+    reportId: report.id,
+    fileName: file.name,
+    fileSize: file.size,
+  });
+
+  enqueueReportAnalysis(report.id);
+
+  return NextResponse.json({ report: toPublicReport(report) }, { status: 201 });
+}

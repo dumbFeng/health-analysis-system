@@ -1,0 +1,32 @@
+{
+  "name": "health-demo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0 --port 3001 --webpack",
+    "dev:local": "next dev --hostname 127.0.0.1 --port 3000 --webpack",
+    "build": "next build --webpack",
+    "start": "next start --hostname 0.0.0.0 --port 3000",
+    "start:local": "next start --hostname 127.0.0.1 --port 3000",
+    "tunnel:quick": "cloudflared tunnel --url http://127.0.0.1:3000",
+    "share:dev": "bash ./scripts/share-dev.sh",
+    "share:prod": "bash ./scripts/share-prod.sh",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "ali-oss": "^6.23.0",
+    "next": "latest",
+    "openai": "^6.34.0",
+    "pdf-parse": "^1.1.1",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest"
+  }
+}
