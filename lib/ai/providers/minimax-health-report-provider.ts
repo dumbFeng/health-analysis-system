@@ -13,6 +13,14 @@ import { extractPdfText } from "@/lib/pdf-text-extractor";
 
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 
+type MiniMaxChatResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+};
+
 function extractJsonBlock(text: string) {
   const normalized = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
@@ -75,6 +83,30 @@ function extractJsonBlock(text: string) {
   }
 
   return normalized;
+}
+
+function sanitizeJsonCandidate(text: string) {
+  return text
+    .replace(/\u201c|\u201d/g, "\"")
+    .replace(/\u2018|\u2019/g, "'")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    .replace(/,\s*([}\]])/g, "$1")
+    .trim();
+}
+
+function parseJsonWithRepairAttempts(text: string) {
+  const candidates = [text, sanitizeJsonCandidate(text)];
+  let lastError: Error | null = null;
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("JSON 解析失败。");
+    }
+  }
+
+  throw lastError ?? new Error("JSON 解析失败。");
 }
 
 function validateHealthReportAnalysisShape(
@@ -228,6 +260,59 @@ export class MiniMaxHealthReportProvider implements HealthReportAiProvider {
     }
   }
 
+  private async createChatCompletion(messages: Array<{ role: "system" | "user"; content: string }>) {
+    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.modelName,
+        temperature: 0.1,
+        messages,
+        response_format: {
+          type: "json_object",
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`MiniMax 分析请求失败: ${await response.text()}`);
+    }
+
+    return (await response.json()) as MiniMaxChatResponse;
+  }
+
+  private async repairMalformedJson(rawContent: string, parseError: Error) {
+    const payload = await this.createChatCompletion([
+      {
+        role: "system",
+        content:
+          "你是 JSON 修复器。你的任务是把用户提供的内容修复成单个合法 JSON 对象。不要输出解释、Markdown 或代码块，只输出 JSON。",
+      },
+      {
+        role: "user",
+        content: `下面这段内容本应是健康报告分析 JSON，但当前无法解析。
+
+解析错误：
+${parseError.message}
+
+请在不引入额外说明文字的前提下，将它修复成一个合法的 JSON 对象。允许补齐必要的空数组、空字符串或空对象，但不要凭空添加报告事实。
+
+原始内容：
+${rawContent}`,
+      },
+    ]);
+
+    const repaired = payload.choices?.[0]?.message?.content?.trim();
+    if (!repaired) {
+      throw new Error(`MiniMax JSON 修复失败：${parseError.message}`);
+    }
+
+    return parseJsonWithRepairAttempts(extractJsonBlock(repaired));
+  }
+
   async analyzeHealthReport({
     report,
   }: AnalyzeHealthReportInput): Promise<HealthReportAnalysis> {
@@ -247,49 +332,33 @@ export class MiniMaxHealthReportProvider implements HealthReportAiProvider {
 
 ${extracted.text}`;
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
+    const payload = await this.createChatCompletion([
+      {
+        role: "system",
+        content: `${buildHealthReportAnalysisInstructions()} 输出必须是纯 JSON，不要添加解释性前后缀。`,
       },
-      body: JSON.stringify({
-        model: this.modelName,
-        temperature: 0.1,
-        messages: [
-          {
-            role: "system",
-            content: `${buildHealthReportAnalysisInstructions()} 输出必须是纯 JSON，不要添加解释性前后缀。`,
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        response_format: {
-          type: "json_object",
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`MiniMax 分析请求失败: ${await response.text()}`);
-    }
-
-    const payload = (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
-        };
-      }>;
-    };
+      {
+        role: "user",
+        content: prompt,
+      },
+    ]);
 
     const content = payload.choices?.[0]?.message?.content?.trim();
     if (!content) {
       throw new Error("MiniMax 未返回可解析的结构化分析内容。");
     }
 
-    const analysis = JSON.parse(extractJsonBlock(content)) as unknown;
+    let analysis: unknown;
+    const jsonBlock = extractJsonBlock(content);
+    try {
+      analysis = parseJsonWithRepairAttempts(jsonBlock);
+    } catch (error) {
+      analysis = await this.repairMalformedJson(
+        jsonBlock,
+        error instanceof Error ? error : new Error("JSON 解析失败。"),
+      );
+    }
+
     validateHealthReportAnalysisShape(analysis);
     return analysis as HealthReportAnalysis;
   }
