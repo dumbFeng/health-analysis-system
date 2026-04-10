@@ -63,9 +63,13 @@ export function ReportDashboard({
   const [aiHealth, setAiHealth] = useState(initialAiHealth);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [reportPendingDelete, setReportPendingDelete] = useState<PublicReport | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [selectedPatient, setSelectedPatient] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("all");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   async function refreshReports() {
     const response = await fetch("/api/reports", { cache: "no-store" });
@@ -84,6 +88,21 @@ export function ReportDashboard({
   useEffect(() => {
     setAiHealth(initialAiHealth);
   }, [initialAiHealth]);
+
+  useEffect(() => {
+    if (!openMenuId) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [openMenuId]);
 
   const hasActiveAnalysis = useMemo(
     () => reports.some((report) => report.status === "analyzing"),
@@ -168,6 +187,26 @@ export function ReportDashboard({
       await refreshReports();
     } finally {
       setIsBusy(false);
+    }
+  }
+
+  async function handleDelete(reportId: string) {
+    setPendingDeleteId(reportId);
+    setOpenMenuId(null);
+    try {
+      const response = await fetch(`/api/reports?id=${reportId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        setUploadError(data.error ?? "删除失败，请稍后再试。");
+        return;
+      }
+
+      setReports((current) => current.filter((report) => report.id !== reportId));
+    } finally {
+      setPendingDeleteId(null);
     }
   }
 
@@ -261,9 +300,9 @@ export function ReportDashboard({
           <div className="flex items-end justify-between gap-4">
             <div>
               <p className="section-title">报告列表</p>
-              <h2 className="mt-2 text-3xl font-semibold text-stone-900">
+              {/* <h2 className="mt-2 text-3xl font-semibold text-stone-900">
                 分析任务卡片
-              </h2>
+              </h2> */}
             </div>
             <button
               type="button"
@@ -333,75 +372,109 @@ export function ReportDashboard({
               </p>
             </div>
           ) : (
-            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+            <div className="mt-6 grid grid-cols-2 gap-3 lg:gap-4">
               {filteredReports.map((report) => {
                 const status = statusMeta[report.status];
 
                 return (
                   <article
                     key={report.id}
-                    className="rounded-[1.6rem] border border-stone-200/70 bg-white/75 p-5 shadow-[0_14px_30px_rgba(102,84,58,0.06)]"
+                    className="rounded-[1.25rem] border border-stone-200/70 bg-white/75 p-3 shadow-[0_14px_30px_rgba(102,84,58,0.06)] sm:rounded-[1.6rem] sm:p-5"
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <span
-                        className={`rounded-full px-3 py-1 text-sm font-medium ${status.className}`}
-                      >
-                        {status.label}
-                      </span>
-                      <span className="text-sm text-stone-500">
-                        {formatDate(report.createdAt)}
-                      </span>
+                    <div className="flex items-start justify-between gap-2 sm:gap-3">
+                      <div className="flex min-w-0 flex-col gap-2 sm:flex-wrap sm:flex-row sm:items-center sm:gap-3">
+                        <span
+                          className={`w-fit rounded-full px-2.5 py-1 text-xs font-medium sm:px-3 sm:text-sm ${status.className}`}
+                        >
+                          {status.label}
+                        </span>
+                        <span className="text-xs text-stone-500 sm:text-sm">
+                          {formatDate(report.createdAt)}
+                        </span>
+                      </div>
+                      <div className="relative" ref={openMenuId === report.id ? menuRef : null}>
+                        <button
+                          type="button"
+                          aria-label="更多操作"
+                          aria-expanded={openMenuId === report.id}
+                          onClick={() => {
+                            setOpenMenuId((current) =>
+                              current === report.id ? null : report.id,
+                            );
+                          }}
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white/85 text-stone-500 transition hover:border-stone-300 hover:text-stone-900 sm:h-10 sm:w-10"
+                        >
+                          <span className="text-base leading-none sm:text-lg">...</span>
+                        </button>
+                        {openMenuId === report.id ? (
+                          <div className="absolute top-12 right-0 z-10 min-w-36 rounded-[1.1rem] border border-stone-200/80 bg-white p-2 shadow-[0_18px_40px_rgba(41,37,36,0.12)]">
+                            <button
+                              type="button"
+                              disabled={pendingDeleteId === report.id}
+                              onClick={() => {
+                                setReportPendingDelete(report);
+                                setOpenMenuId(null);
+                              }}
+                              className="w-full rounded-[0.9rem] px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {pendingDeleteId === report.id ? "删除中..." : "删除报告"}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
 
-                    <h3 className="mt-4 text-xl font-semibold text-stone-900">
+                    <h3 className="mt-3 line-clamp-2 text-sm font-semibold text-stone-900 sm:mt-4 sm:text-xl">
                       {report.patientName || report.fileName}
                     </h3>
                     {getReportSummary(report) ? (
-                      <p className="mt-2 text-sm leading-7 text-stone-600">
+                      <p className="mt-2 line-clamp-3 text-xs leading-5 text-stone-600 sm:text-sm sm:leading-7">
                         {getReportSummary(report)}
                       </p>
                     ) : null}
 
                     {report.status !== "failed" ? (
-                      <dl className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-[1.2rem] bg-stone-50/90 px-4 py-3">
-                          <dt className="text-xs tracking-[0.16em] text-stone-500 uppercase">
+                      <dl className="mt-4 grid gap-2 sm:mt-5 sm:gap-3 sm:grid-cols-2">
+                        <div className="rounded-[1rem] bg-stone-50/90 px-3 py-2.5 sm:rounded-[1.2rem] sm:px-4 sm:py-3">
+                          <dt className="text-[10px] tracking-[0.14em] text-stone-500 uppercase sm:text-xs sm:tracking-[0.16em]">
                             原文件
                           </dt>
-                          <dd className="mt-2 text-sm text-stone-700">{report.fileName}</dd>
+                          <dd className="mt-1.5 truncate text-xs text-stone-700 sm:mt-2 sm:line-clamp-2 sm:text-sm">
+                            {report.fileName}
+                          </dd>
                         </div>
-                        <div className="rounded-[1.2rem] bg-stone-50/90 px-4 py-3">
-                          <dt className="text-xs tracking-[0.16em] text-stone-500 uppercase">
+                        <div className="rounded-[1rem] bg-stone-50/90 px-3 py-2.5 sm:rounded-[1.2rem] sm:px-4 sm:py-3">
+                          <dt className="text-[10px] tracking-[0.14em] text-stone-500 uppercase sm:text-xs sm:tracking-[0.16em]">
                             大小
                           </dt>
-                          <dd className="mt-2 text-sm text-stone-700">
+                          <dd className="mt-1.5 text-xs text-stone-700 sm:mt-2 sm:text-sm">
                             {formatFileSize(report.fileSize)}
                           </dd>
                         </div>
-                        <div className="rounded-[1.2rem] bg-stone-50/90 px-4 py-3">
-                          <dt className="text-xs tracking-[0.16em] text-stone-500 uppercase">
+                        <div className="rounded-[1rem] bg-stone-50/90 px-3 py-2.5 sm:rounded-[1.2rem] sm:px-4 sm:py-3">
+                          <dt className="text-[10px] tracking-[0.14em] text-stone-500 uppercase sm:text-xs sm:tracking-[0.16em]">
                             体检日期
                           </dt>
-                          <dd className="mt-2 text-sm text-stone-700">
+                          <dd className="mt-1.5 line-clamp-2 text-xs text-stone-700 sm:mt-2 sm:text-sm">
                             {report.examDate || "待分析"}
                           </dd>
                         </div>
-                        <div className="rounded-[1.2rem] bg-stone-50/90 px-4 py-3">
-                          <dt className="text-xs tracking-[0.16em] text-stone-500 uppercase">
+                        <div className="hidden rounded-[1rem] bg-stone-50/90 px-3 py-2.5 sm:block sm:rounded-[1.2rem] sm:px-4 sm:py-3">
+                          <dt className="text-[10px] tracking-[0.14em] text-stone-500 uppercase sm:text-xs sm:tracking-[0.16em]">
                             机构
                           </dt>
-                          <dd className="mt-2 text-sm text-stone-700">
+                          <dd className="mt-1.5 line-clamp-2 text-xs text-stone-700 sm:mt-2 sm:text-sm">
                             {report.institution || "待分析"}
                           </dd>
                         </div>
                       </dl>
                     ) : null}
 
-                    <div className="mt-5 flex flex-wrap gap-3">
+                    <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:flex-wrap sm:gap-3">
                       {report.status === "succeeded" ? (
                         <Link
                           href={`/reports?id=${report.id}`}
-                          className="button-primary rounded-full px-4 py-2 text-sm font-medium transition"
+                          className="button-primary rounded-full px-3 py-2 text-center text-xs font-medium transition sm:px-4 sm:text-sm"
                         >
                           查看分析结果
                         </Link>
@@ -413,7 +486,7 @@ export function ReportDashboard({
                           onClick={() => {
                             void handleRetry(report.id);
                           }}
-                          className="rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-500"
+                          className="rounded-full bg-rose-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-rose-500 sm:px-4 sm:text-sm"
                         >
                           重新分析
                         </button>
@@ -426,6 +499,53 @@ export function ReportDashboard({
           )}
         </section>
       </div>
+
+      {reportPendingDelete ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/35 px-4">
+          <div className="w-full max-w-md rounded-[2rem] border border-stone-200/80 bg-[var(--panel-strong)] p-6 shadow-[0_24px_60px_rgba(28,25,23,0.22)]">
+            <p className="section-title">删除确认</p>
+            <h3 className="mt-3 text-2xl font-semibold text-stone-900">确认删除这份报告？</h3>
+            <p className="mt-3 text-sm leading-7 text-stone-600">
+              删除后将移除
+              <span className="font-medium text-stone-900">
+                {reportPendingDelete.patientName || reportPendingDelete.fileName}
+              </span>
+              的原始 PDF 和分析结果，操作后无法恢复。
+            </p>
+
+            <div className="mt-6 rounded-[1.3rem] bg-stone-50/90 px-4 py-4 text-sm text-stone-700">
+              <p className="font-medium text-stone-900">将被删除的内容</p>
+              <p className="mt-2">文件名：{reportPendingDelete.fileName}</p>
+              <p className="mt-1">上传时间：{formatDate(reportPendingDelete.createdAt)}</p>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                disabled={pendingDeleteId === reportPendingDelete.id}
+                onClick={() => {
+                  setReportPendingDelete(null);
+                }}
+                className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={pendingDeleteId === reportPendingDelete.id}
+                onClick={() => {
+                  void handleDelete(reportPendingDelete.id).then(() => {
+                    setReportPendingDelete(null);
+                  });
+                }}
+                className="rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {pendingDeleteId === reportPendingDelete.id ? "删除中..." : "确认删除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -25,6 +25,7 @@ declare module "ali-oss" {
     constructor(options: OSSOptions);
     put(name: string, file: Buffer | string): Promise<unknown>;
     get(name: string): Promise<{ content: Buffer }>;
+    delete(name: string): Promise<unknown>;
     list(query: {
       prefix?: string;
       marker?: string;

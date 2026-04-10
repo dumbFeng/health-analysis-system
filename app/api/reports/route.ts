@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createStoredReport,
+  deleteReport,
   listReports,
   toPublicReport,
 } from "@/lib/report-store";
@@ -85,4 +86,27 @@ export async function POST(request: Request) {
   enqueueReportAnalysis(report.id);
 
   return NextResponse.json({ report: toPublicReport(report) }, { status: 201 });
+}
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+
+  if (!id) {
+    await logger.warn("删除报告失败：缺少报告 id", {});
+    return NextResponse.json({ error: "缺少报告 id。" }, { status: 400 });
+  }
+
+  try {
+    await deleteReport(id);
+  } catch (error) {
+    await logger.warn("删除报告失败：报告不存在或删除异常", {
+      reportId: id,
+      error,
+    });
+    return NextResponse.json({ error: "报告不存在或删除失败。" }, { status: 404 });
+  }
+
+  await logger.info("报告删除成功", { reportId: id });
+  return NextResponse.json({ ok: true }, { status: 200 });
 }

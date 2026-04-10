@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ReportDetailToc } from "@/components/report-detail-toc";
 import { normalizeHealthReportAnalysis } from "@/lib/report-analysis-normalizer";
 import { getReport } from "@/lib/report-store";
 import type { HealthReportAnalysis, RiskLevel } from "@/lib/report-types";
@@ -196,20 +197,7 @@ export default async function ReportDetailPage({
 
         <section className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="xl:sticky xl:top-6 xl:self-start">
-            <div className="glass rounded-[2rem] p-5">
-              <p className="section-title">快捷导航</p>
-              <nav className="mt-4 flex flex-col gap-2">
-                {sectionLinks.map((item) => (
-                  <a
-                    key={item.id}
-                    href={`#${item.id}`}
-                    className="rounded-[1.1rem] px-3 py-3 text-sm text-stone-700 transition hover:bg-white/70 hover:text-stone-900"
-                  >
-                    {item.label}
-                  </a>
-                ))}
-              </nav>
-            </div>
+            <ReportDetailToc sectionLinks={sectionLinks} />
           </aside>
 
           <div className="space-y-6">

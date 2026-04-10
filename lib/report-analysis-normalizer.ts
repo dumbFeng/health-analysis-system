@@ -91,6 +91,32 @@ function normalizeSystemRiskKey(value: unknown): SystemRiskKey {
     : "other";
 }
 
+function normalizeRiskScore(value: unknown, riskLevel: RiskLevel) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  if (typeof value === "string") {
+    const matched = value.match(/-?\d+(?:\.\d+)?/);
+    if (matched) {
+      const parsed = Number.parseFloat(matched[0]);
+      if (Number.isFinite(parsed)) {
+        return Math.max(0, Math.min(100, Math.round(parsed)));
+      }
+    }
+  }
+
+  if (riskLevel === "高风险") {
+    return 75;
+  }
+
+  if (riskLevel === "中风险") {
+    return 55;
+  }
+
+  return 25;
+}
+
 function sortByRiskLevel<T>(items: T[], getRiskLevel: (item: T) => RiskLevel) {
   return [...items].sort(
     (left, right) => riskOrder[getRiskLevel(left)] - riskOrder[getRiskLevel(right)],
@@ -105,6 +131,7 @@ export function normalizeHealthReportAnalysis(
   const executiveSummary = asRecord(analysis.executiveSummary);
   const riskBuckets = asRecord(analysis.riskBuckets);
   const lifestyleAdvice = asRecord(analysis.lifestyleAdvice);
+  const normalizedOverallRiskLevel = normalizeRiskLevel(executiveSummary.overallRiskLevel);
 
   return {
     ...analysis,
@@ -139,8 +166,8 @@ export function normalizeHealthReportAnalysis(
         typeof patient.menopauseStatus === "string" ? patient.menopauseStatus : "",
     },
     executiveSummary: {
-      overallRiskLevel: normalizeRiskLevel(executiveSummary.overallRiskLevel),
-      riskScore: typeof executiveSummary.riskScore === "number" ? executiveSummary.riskScore : 0,
+      overallRiskLevel: normalizedOverallRiskLevel,
+      riskScore: normalizeRiskScore(executiveSummary.riskScore, normalizedOverallRiskLevel),
       summary: typeof executiveSummary.summary === "string" ? executiveSummary.summary : "",
       topSignals: asStringArray(executiveSummary.topSignals),
     },

@@ -4,6 +4,7 @@ import { normalizeStoredReport } from "@/lib/report-analysis-normalizer";
 import type { PublicReport, StoredReport } from "@/lib/report-types";
 import {
   buildStorageKey,
+  deleteStoredFile,
   getStorageMode,
   listStoredKeys,
   readStoredFile,
@@ -105,6 +106,14 @@ export async function updateReport(
   });
   await saveReport(next);
   return next;
+}
+
+export async function deleteReport(reportId: string) {
+  const report = await getReport(reportId);
+  await Promise.all([
+    deleteStoredFile(report.fileKey, "upload"),
+    deleteStoredFile(report.reportKey, "report"),
+  ]);
 }
 
 export function toPublicReport(report: StoredReport): PublicReport {

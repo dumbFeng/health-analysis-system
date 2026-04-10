@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import OSS from "ali-oss";
 import type { StorageMode } from "@/lib/report-types";
@@ -165,4 +165,16 @@ export async function listStoredKeys(category: StorageCategory) {
   const prefix = `${ossPrefix}/${category === "upload" ? "uploads" : "reports"}/`;
   const keys = await listOssKeys(prefix);
   return keys.map((key) => key.slice(prefix.length)).filter(Boolean);
+}
+
+export async function deleteStoredFile(key: string, category: StorageCategory) {
+  if (getStorageMode() === "local") {
+    const fullPath = path.join(getLocalBaseDir(category), key);
+    await rm(fullPath, { force: true });
+    return;
+  }
+
+  const client = getOssClient();
+  const objectKey = `${ossPrefix}/${category === "upload" ? "uploads" : "reports"}/${key}`;
+  await client.delete(objectKey);
 }
