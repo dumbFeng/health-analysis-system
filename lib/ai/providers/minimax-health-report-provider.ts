@@ -79,56 +79,27 @@ function extractJsonBlock(text: string) {
 
 function validateHealthReportAnalysisShape(
   value: unknown,
-): asserts value is HealthReportAnalysis {
+): asserts value is Partial<HealthReportAnalysis> {
   if (!value || typeof value !== "object") {
     throw new Error("MiniMax 返回的分析结果不是合法对象。");
   }
 
   const candidate = value as Record<string, unknown>;
-  const requiredTopLevel = [
-    "schemaVersion",
-    "reportId",
-    "generatedAt",
-    "model",
-    "reportMeta",
-    "patient",
-    "executiveSummary",
-    "abnormalItems",
-    "keyNormalItems",
-    "riskBuckets",
-    "systemRisks",
-    "problemTags",
-    "recommendations",
-    "departmentSuggestions",
-    "followUpPlan",
-    "lifestyleAdvice",
-    "questionsForDoctor",
-    "evidenceMap",
-    "uncertainties",
-    "disclaimers",
-  ];
-
-  const missingTopLevel = requiredTopLevel.filter((key) => !(key in candidate));
-  if (missingTopLevel.length > 0) {
-    throw new Error(
-      `MiniMax 返回结构不完整，缺少字段: ${missingTopLevel.join(", ")}`,
-    );
-  }
 
   if (
     !candidate.patient ||
     typeof candidate.patient !== "object" ||
-    !("name" in (candidate.patient as Record<string, unknown>))
+    Object.keys(candidate.patient as Record<string, unknown>).length === 0
   ) {
-    throw new Error("MiniMax 返回结构不完整，缺少 patient.name。");
+    throw new Error("MiniMax 返回结构不完整，缺少 patient。");
   }
 
   if (
     !candidate.reportMeta ||
     typeof candidate.reportMeta !== "object" ||
-    !("examDate" in (candidate.reportMeta as Record<string, unknown>))
+    Object.keys(candidate.reportMeta as Record<string, unknown>).length === 0
   ) {
-    throw new Error("MiniMax 返回结构不完整，缺少 reportMeta.examDate。");
+    throw new Error("MiniMax 返回结构不完整，缺少 reportMeta。");
   }
 
   if (
@@ -320,6 +291,6 @@ ${extracted.text}`;
 
     const analysis = JSON.parse(extractJsonBlock(content)) as unknown;
     validateHealthReportAnalysisShape(analysis);
-    return analysis;
+    return analysis as HealthReportAnalysis;
   }
 }

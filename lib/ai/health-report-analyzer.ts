@@ -1,3 +1,4 @@
+import { normalizeHealthReportAnalysis } from "@/lib/report-analysis-normalizer";
 import { createHealthReportAiProviders } from "@/lib/ai/ai-provider-factory";
 import { logger } from "@/lib/logger";
 import { analysisQueue } from "@/lib/queue/report-queues";
@@ -34,7 +35,9 @@ export async function analyzeStoredReport(reportId: string) {
           provider: provider.providerName,
           model: provider.modelName,
         });
-        const analysis = await provider.analyzeHealthReport({ report });
+        const analysis = normalizeHealthReportAnalysis(
+          await provider.analyzeHealthReport({ report }),
+        );
 
         await updateReport(reportId, (current) => ({
           ...current,
