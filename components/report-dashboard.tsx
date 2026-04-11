@@ -55,6 +55,22 @@ function getReportSummary(report: PublicReport) {
   return "";
 }
 
+function getRiskClass(level: PublicReport["overallRiskLevel"]) {
+  if (level === "高风险") {
+    return "bg-rose-100 text-rose-700";
+  }
+
+  if (level === "中风险") {
+    return "bg-amber-100 text-amber-800";
+  }
+
+  if (level === "低风险") {
+    return "bg-emerald-100 text-emerald-700";
+  }
+
+  return "bg-stone-100 text-stone-500";
+}
+
 export function ReportDashboard({
   initialReports,
   initialAiHealth,
@@ -66,6 +82,7 @@ export function ReportDashboard({
   const [reportPendingDelete, setReportPendingDelete] = useState<PublicReport | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [copiedReportId, setCopiedReportId] = useState<string | null>(null);
   const [selectedPatient, setSelectedPatient] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("all");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -208,6 +225,24 @@ export function ReportDashboard({
     } finally {
       setPendingDeleteId(null);
     }
+  }
+
+  async function handleCopyReportId(reportId: string) {
+    try {
+      await navigator.clipboard.writeText(reportId);
+    } catch {
+      const input = document.createElement("input");
+      input.value = reportId;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+    }
+
+    setCopiedReportId(reportId);
+    window.setTimeout(() => {
+      setCopiedReportId((current) => (current === reportId ? null : current));
+    }, 1600);
   }
 
   return (
@@ -392,36 +427,38 @@ export function ReportDashboard({
                           {formatDate(report.createdAt)}
                         </span>
                       </div>
-                      <div className="relative" ref={openMenuId === report.id ? menuRef : null}>
-                        <button
-                          type="button"
-                          aria-label="更多操作"
-                          aria-expanded={openMenuId === report.id}
-                          onClick={() => {
-                            setOpenMenuId((current) =>
-                              current === report.id ? null : report.id,
-                            );
-                          }}
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white/85 text-stone-500 transition hover:border-stone-300 hover:text-stone-900 sm:h-10 sm:w-10"
-                        >
-                          <span className="text-base leading-none sm:text-lg">...</span>
-                        </button>
-                        {openMenuId === report.id ? (
-                          <div className="absolute top-12 right-0 z-10 min-w-36 rounded-[1.1rem] border border-stone-200/80 bg-white p-2 shadow-[0_18px_40px_rgba(41,37,36,0.12)]">
-                            <button
-                              type="button"
-                              disabled={pendingDeleteId === report.id}
-                              onClick={() => {
-                                setReportPendingDelete(report);
-                                setOpenMenuId(null);
-                              }}
-                              className="w-full rounded-[0.9rem] px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {pendingDeleteId === report.id ? "删除中..." : "删除报告"}
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
+                      {report.status !== "analyzing" ? (
+                        <div className="relative" ref={openMenuId === report.id ? menuRef : null}>
+                          <button
+                            type="button"
+                            aria-label="更多操作"
+                            aria-expanded={openMenuId === report.id}
+                            onClick={() => {
+                              setOpenMenuId((current) =>
+                                current === report.id ? null : report.id,
+                              );
+                            }}
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white/85 text-stone-500 transition hover:border-stone-300 hover:text-stone-900 sm:h-10 sm:w-10"
+                          >
+                            <span className="text-base leading-none sm:text-lg">...</span>
+                          </button>
+                          {openMenuId === report.id ? (
+                            <div className="absolute top-12 right-0 z-10 min-w-36 rounded-[1.1rem] border border-stone-200/80 bg-white p-2 shadow-[0_18px_40px_rgba(41,37,36,0.12)]">
+                              <button
+                                type="button"
+                                disabled={pendingDeleteId === report.id}
+                                onClick={() => {
+                                  setReportPendingDelete(report);
+                                  setOpenMenuId(null);
+                                }}
+                                className="w-full rounded-[0.9rem] px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {pendingDeleteId === report.id ? "删除中..." : "删除报告"}
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
 
                     <h3 className="mt-3 line-clamp-2 text-sm font-semibold text-stone-900 sm:mt-4 sm:text-xl">
@@ -431,6 +468,53 @@ export function ReportDashboard({
                       <p className="mt-2 line-clamp-3 text-xs leading-5 text-stone-600 sm:text-sm sm:leading-7">
                         {getReportSummary(report)}
                       </p>
+                    ) : null}
+                    <div className="mt-2 flex w-full items-center gap-2 rounded-[0.9rem] bg-stone-50/90 px-2.5 py-2 sm:px-3">
+                      <span className="shrink-0 text-[10px] tracking-[0.14em] text-stone-500 uppercase sm:text-xs">
+                        ID
+                      </span>
+                      <code className="min-w-0 flex-1 truncate text-[11px] text-stone-600 sm:text-xs">
+                        {report.id}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleCopyReportId(report.id);
+                        }}
+                        className="shrink-0 rounded-full border border-stone-200 bg-white px-2 py-1 text-[10px] font-medium text-stone-600 transition hover:border-emerald-300 hover:text-emerald-700 sm:text-xs"
+                      >
+                        {copiedReportId === report.id ? "已复制" : "复制"}
+                      </button>
+                    </div>
+
+                    {report.status === "succeeded" ? (
+                      <dl className="mt-4 grid gap-2 sm:mt-5 sm:gap-3 sm:grid-cols-2">
+                        <div className="rounded-[1rem] bg-stone-50/90 px-3 py-2.5 sm:rounded-[1.2rem] sm:px-4 sm:py-3">
+                          <dt className="text-[10px] tracking-[0.14em] text-stone-500 uppercase sm:text-xs sm:tracking-[0.16em]">
+                            模型
+                          </dt>
+                          <dd className="mt-1.5 truncate text-xs text-stone-700 sm:mt-2 sm:text-sm">
+                            {report.analysisModel || "-"}
+                          </dd>
+                        </div>
+                        <div className="rounded-[1rem] bg-stone-50/90 px-3 py-2.5 sm:rounded-[1.2rem] sm:px-4 sm:py-3">
+                          <dt className="text-[10px] tracking-[0.14em] text-stone-500 uppercase sm:text-xs sm:tracking-[0.16em]">
+                            风险
+                          </dt>
+                          <dd className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-stone-700 sm:mt-2 sm:text-sm">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium sm:text-xs ${getRiskClass(report.overallRiskLevel)}`}
+                            >
+                              {report.overallRiskLevel || "-"}
+                            </span>
+                            <span>
+                              {typeof report.riskScore === "number"
+                                ? `${report.riskScore} 分`
+                                : "-"}
+                            </span>
+                          </dd>
+                        </div>
+                      </dl>
                     ) : null}
 
                     {report.status !== "failed" ? (

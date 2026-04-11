@@ -127,8 +127,8 @@ export type StoredReport = {
   id: string;
   fileName: string;
   storageMode: StorageMode;
-  fileKey: string;
-  reportKey: string;
+  sourceFilePath: string;
+  analysisFilePath: string;
   mimeType: string;
   fileSize: number;
   createdAt: string;
@@ -138,11 +138,16 @@ export type StoredReport = {
   examDate: string | null;
   institution: string | null;
   summary: string | null;
+  analysisModel: string | null;
+  overallRiskLevel: RiskLevel | null;
+  riskScore: number | null;
   errorMessage: string | null;
   analysis: HealthReportAnalysis | null;
 };
 
 export type PublicReport = Omit<
   StoredReport,
-  "fileKey" | "reportKey" | "analysis"
+  | "sourceFilePath"
+  | "analysisFilePath"
+  | "analysis"
 >;

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { ensureReportAnalysisRecovery } from "@/lib/ai/report-analysis-recovery";
 import {
   createStoredReport,
   deleteReport,
+  getReport,
   listReports,
   toPublicReport,
 } from "@/lib/report-store";
@@ -12,6 +14,8 @@ import { uploadQueue } from "@/lib/queue/report-queues";
 export const runtime = "nodejs";
 
 export async function GET() {
+  await ensureReportAnalysisRecovery();
+
   const reports = await listReports();
   await logger.debug("查询报告列表", {
     count: reports.length,
@@ -98,6 +102,15 @@ export async function DELETE(request: Request) {
   }
 
   try {
+    const report = await getReport(id);
+    if (report.status === "analyzing") {
+      await logger.warn("删除报告失败：报告仍在分析中", { reportId: id });
+      return NextResponse.json(
+        { error: "报告正在分析中，暂不支持删除。" },
+        { status: 409 },
+      );
+    }
+
     await deleteReport(id);
   } catch (error) {
     await logger.warn("删除报告失败：报告不存在或删除异常", {

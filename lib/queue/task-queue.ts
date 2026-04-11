@@ -7,6 +7,7 @@ type QueueTask<T> = {
 
 export class TaskQueue {
   private readonly tasks: QueueTask<unknown>[] = [];
+  private readonly taskIds = new Set<string>();
   private running = 0;
 
   constructor(
@@ -42,8 +43,13 @@ export class TaskQueue {
     };
   }
 
+  hasTask(id: string) {
+    return this.taskIds.has(id);
+  }
+
   enqueue<T>(id: string, run: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
+      this.taskIds.add(id);
       this.tasks.push({
         id,
         run,
@@ -72,6 +78,7 @@ export class TaskQueue {
         })
         .finally(() => {
           this.running -= 1;
+          this.taskIds.delete(task.id);
           this.pump();
         });
     }

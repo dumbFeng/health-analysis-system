@@ -7,6 +7,8 @@ const storageMode = (process.env.REPORT_STORAGE_MODE || "local") as StorageMode;
 const localRoot = path.join(process.cwd(), "storage", "local");
 const localUploadsRoot = path.join(localRoot, "uploads");
 const localReportsRoot = path.join(localRoot, "reports");
+const localUploadsRelativeRoot = path.join("storage", "local", "uploads");
+const localReportsRelativeRoot = path.join("storage", "local", "reports");
 
 const ossPrefix = (process.env.OSS_BASE_PREFIX || "health-reports").replace(
   /^\/+|\/+$/g,
@@ -17,6 +19,12 @@ type StorageCategory = "upload" | "report";
 
 function getLocalBaseDir(category: StorageCategory) {
   return category === "upload" ? localUploadsRoot : localReportsRoot;
+}
+
+function getLocalRelativeBaseDir(category: StorageCategory) {
+  return category === "upload"
+    ? localUploadsRelativeRoot
+    : localReportsRelativeRoot;
 }
 
 function ensureOssConfig() {
@@ -95,6 +103,42 @@ async function listOssKeys(prefix: string) {
 
 export function getStorageMode(): StorageMode {
   return storageMode === "oss" ? "oss" : "local";
+}
+
+export function getStoredFileLocation(key: string, category: StorageCategory) {
+  if (getStorageMode() === "local") {
+    return path.join(getLocalRelativeBaseDir(category), key);
+  }
+
+  return `${ossPrefix}/${category === "upload" ? "uploads" : "reports"}/${key}`;
+}
+
+export function getStoragePath(key: string, category: StorageCategory) {
+  return getStoredFileLocation(key, category);
+}
+
+export function getStorageKeyFromPath(pathOrKey: string, category: StorageCategory) {
+  if (getStorageMode() === "oss") {
+    const prefix = `${ossPrefix}/${category === "upload" ? "uploads" : "reports"}/`;
+    return pathOrKey.startsWith(prefix) ? pathOrKey.slice(prefix.length) : pathOrKey;
+  }
+
+  const prefix = `${getLocalRelativeBaseDir(category)}${path.sep}`;
+  return pathOrKey.startsWith(prefix) ? pathOrKey.slice(prefix.length) : pathOrKey;
+}
+
+export function getStoredFileUrl(key: string, category: StorageCategory) {
+  if (getStorageMode() === "local") {
+    return "";
+  }
+
+  const config = ensureOssConfig();
+  const protocol = config.secure ? "https" : "http";
+  const host =
+    config.endpoint ||
+    `${config.bucket}.${config.region}.aliyuncs.com`;
+  const normalizedHost = host.replace(/^https?:\/\//, "");
+  return `${protocol}://${normalizedHost}/${getStoredFileLocation(key, category)}`;
 }
 
 export function buildStorageKey(params: {

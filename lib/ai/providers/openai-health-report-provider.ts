@@ -12,7 +12,7 @@ import type {
   HealthReportAiProvider,
 } from "@/lib/ai/ai-provider";
 import type { HealthReportAnalysis } from "@/lib/report-types";
-import { readStoredFile } from "@/lib/storage-provider";
+import { getStorageKeyFromPath, readStoredFile } from "@/lib/storage-provider";
 
 const OPENAI_API_BASE = "https://api.openai.com/v1";
 
@@ -124,8 +124,9 @@ export class OpenAIHealthReportProvider implements HealthReportAiProvider {
 
   private async uploadPdf(report: AnalyzeHealthReportInput["report"]) {
     const client = this.createClient();
-    const buffer = await readStoredFile(report.fileKey, "upload");
-    const file = await toFile(buffer, basename(report.fileKey), {
+    const sourceFileKey = getStorageKeyFromPath(report.sourceFilePath, "upload");
+    const buffer = await readStoredFile(sourceFileKey, "upload");
+    const file = await toFile(buffer, basename(sourceFileKey), {
       type: report.mimeType || "application/pdf",
     });
     const uploaded = await client.files.create({

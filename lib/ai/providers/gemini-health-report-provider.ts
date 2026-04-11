@@ -11,7 +11,7 @@ import type {
   HealthReportAiProvider,
 } from "@/lib/ai/ai-provider";
 import type { HealthReportAnalysis } from "@/lib/report-types";
-import { readStoredFile } from "@/lib/storage-provider";
+import { getStorageKeyFromPath, readStoredFile } from "@/lib/storage-provider";
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 
@@ -153,7 +153,10 @@ export class GeminiHealthReportProvider implements HealthReportAiProvider {
     this.ensureReady();
 
     const client = this.createClient();
-    const buffer = await readStoredFile(report.fileKey, "upload");
+    const buffer = await readStoredFile(
+      getStorageKeyFromPath(report.sourceFilePath, "upload"),
+      "upload",
+    );
     const pdfPart = createPartFromBase64(
       Buffer.from(buffer).toString("base64"),
       report.mimeType || "application/pdf",

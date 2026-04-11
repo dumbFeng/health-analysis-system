@@ -349,7 +349,8 @@ export function buildHealthReportAnalysisInstructions() {
 5. 所有必填字段都必须存在；不能省略字段，不能输出 null。
 6. 缺失值处理：
    - 字符串字段填 ""
-   - 数值字段填 0
+   - 普通数值字段填 0
+   - executiveSummary.riskScore 不能填 0，必须按风险等级和异常项估算 1-100 的整数分
    - 数组字段填 []
    - 对象字段必须完整保留其内部必填字段
 7. 枚举值必须严格使用：
@@ -359,6 +360,21 @@ export function buildHealthReportAnalysisInstructions() {
 8. 页面编号 sourcePage 无法判断时填 0。
 9. 日期字段无法判断时填 ""，不要猜测。
 10. topSignals 最多 5 条，abnormalItems 最多 15 条，keyNormalItems 最多 5 条，recommendations 最多 8 条，departmentSuggestions 最多 5 条，evidenceMap 仅保留关键结论依据。
+11. executiveSummary.riskScore 必须使用下面的稳定评分规程，不要凭直觉自由给分：
+   - 评分只基于 abnormalItems 中的核心异常项，不要把 riskBuckets、systemRisks、recommendations 里的同一问题重复计数。
+   - “高风险异常项”只包括：恶性肿瘤高度可疑或需排除、TI-RADS 4级及以上、严重心脑血管事件风险、重度骨质疏松、明确严重器官功能异常、报告明确建议尽快专科排查的关键异常。
+   - 普通血压/血糖/血脂升高、肥胖、脂肪肝、轻中度肝功能异常、轻度炎症、低级别结节，通常归为中风险，除非报告明确提示严重或紧急。
+   - 高风险异常项 >= 5：overallRiskLevel = "高风险"，riskScore = 88-95；severe 高风险和 severe 中风险越多分数越高。
+   - 高风险异常项 3-4 个：overallRiskLevel = "高风险"，riskScore = 82-87；severe 高风险和中重度中风险越多分数越高。
+   - 高风险异常项 2 个：overallRiskLevel = "高风险"，riskScore = 72-78；两个均为 moderate 取 72，包含一个 severe 取 76，两个均为 severe 取 78。
+   - 高风险异常项 1 个：如果合并多个中重度中风险异常，overallRiskLevel = "中风险"，riskScore = 62-69；否则靠近 62。
+   - 无高风险异常项，且中风险异常项 >= 3：overallRiskLevel = "中风险"，riskScore = 52-59；中重度中风险异常越多分数越高。
+   - 无高风险异常项，且中风险异常项 1-2 个：overallRiskLevel = "中风险"，riskScore = 46。
+   - 仅有轻微异常或生活方式相关问题：overallRiskLevel = "低风险"，riskScore = 28。
+   - 未发现明确异常：overallRiskLevel = "低风险"，riskScore = 12。
+   - 如果证据不足，不要随机选择分数；使用对应区间的低位分数。
+   - 同一份报告、同一组异常证据，每次必须输出相同的 overallRiskLevel 和 riskScore。
+   - riskScore 必须是整数，不能为 0。
 
 顶层字段必须完整输出：
 schemaVersion, reportId, generatedAt, model, reportMeta, patient, executiveSummary, abnormalItems, keyNormalItems, riskBuckets, systemRisks, problemTags, recommendations, departmentSuggestions, followUpPlan, lifestyleAdvice, questionsForDoctor, evidenceMap, uncertainties, disclaimers
@@ -393,6 +409,7 @@ findingTitle, sourceSection, sourcePage, evidence
 
 特别注意：
 - patient.name、reportMeta.examDate、executiveSummary.summary 这三个字段必须始终存在，缺失时也要按规则填默认值。
+- 风险评分要由异常证据数量和严重程度决定，不要受措辞风格、输出长度、建议数量影响。
 - 如果文本内容不足以支持复杂结论，也要返回“保守但完整”的结构化结果。`;
 }
 
@@ -409,14 +426,19 @@ export function buildHealthReportAnalysisUserPrompt(input: {
 4. 仅依据报告内容，不要补造没有依据的临床信息
 5. 如果某字段无法明确识别，输出空字符串、0 或空数组，但必须保持 schema 完整
 6. 风险判断和建议要克制、可执行、偏健康管理和就诊建议，不直接替代临床确诊
-7. 请先检查顶层字段是否齐全，再检查每个嵌套对象是否齐全，最后再输出
-8. 如果返回了 abnormalItems、recommendations、systemRisks、evidenceMap 等数组，数组里的每个对象都必须是完整对象，不能缺字段
-9. 不能输出 null，不能省略字段，不能输出 JSON 以外的内容
+7. executiveSummary.overallRiskLevel 和 riskScore 必须严格按系统提示中的稳定评分规程生成
+8. executiveSummary.riskScore 必须是 1-100 的整数，不能为 0
+9. 请先检查顶层字段是否齐全，再检查每个嵌套对象是否齐全，最后再输出
+10. 如果返回了 abnormalItems、recommendations、systemRisks、evidenceMap 等数组，数组里的每个对象都必须是完整对象，不能缺字段
+11. 不能输出 null，不能省略字段，不能输出 JSON 以外的内容
 
 输出前自检：
 - patient.name 是否存在
 - reportMeta.examDate 是否存在
 - executiveSummary.summary 是否存在
+- executiveSummary.overallRiskLevel 是否与高风险信号/中风险信号数量匹配
+- executiveSummary.riskScore 是否是 1-100 的非零整数
+- executiveSummary.riskScore 是否落在系统提示定义的稳定评分区间内
 - lifestyleAdvice 六个数组字段是否都存在
 - riskBuckets 是否同时含有 high、medium、low
 - disclaimers 和 uncertainties 是否存在`;

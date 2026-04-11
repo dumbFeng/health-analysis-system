@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { ensureReportAnalysisRecovery } from "@/lib/ai/report-analysis-recovery";
 import { getReport, toPublicReport } from "@/lib/report-store";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  await ensureReportAnalysisRecovery();
+
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 

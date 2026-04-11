@@ -1,15 +1,81 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { getReportRepository } from "@/lib/db/report-repository-factory";
 import { normalizeStoredReport } from "@/lib/report-analysis-normalizer";
-import type { PublicReport, StoredReport } from "@/lib/report-types";
+import type { HealthReportAnalysis, PublicReport, StoredReport } from "@/lib/report-types";
 import {
   buildStorageKey,
   deleteStoredFile,
+  getStorageKeyFromPath,
+  getStoragePath,
   getStorageMode,
   listStoredKeys,
   readStoredFile,
   writeStoredFile,
 } from "@/lib/storage-provider";
+
+let legacyMigrationPromise: Promise<void> | null = null;
+
+function isLegacyStoredReport(value: unknown): value is StoredReport {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<StoredReport> & {
+    fileKey?: string;
+    fileLocation?: string;
+    reportKey?: string;
+    sourceFileKey?: string;
+    sourceFileLocation?: string;
+    analysisFileKey?: string;
+    analysisFileLocation?: string;
+  };
+
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.fileName === "string" &&
+    (typeof candidate.sourceFilePath === "string" ||
+      typeof candidate.sourceFileLocation === "string" ||
+      typeof candidate.sourceFileKey === "string" ||
+      typeof candidate.fileLocation === "string" ||
+      typeof candidate.fileKey === "string") &&
+    (typeof candidate.analysisFilePath === "string" ||
+      typeof candidate.analysisFileLocation === "string" ||
+      typeof candidate.analysisFileKey === "string" ||
+      typeof candidate.reportKey === "string")
+  );
+}
+
+async function migrateLegacyJsonReportsToDatabase() {
+  if (!legacyMigrationPromise) {
+    legacyMigrationPromise = (async () => {
+      const repository = getReportRepository();
+      const keys = await listStoredKeys("report");
+      await Promise.all(
+        keys
+          .filter((key) => key.endsWith(".json"))
+          .map(async (key) => {
+            const content = await readStoredFile(key, "report");
+            const parsed = JSON.parse(content.toString("utf8")) as unknown;
+            if (!isLegacyStoredReport(parsed)) {
+              return;
+            }
+
+            const report = normalizeStoredReport(parsed);
+            await repository.save(report);
+          }),
+      );
+    })();
+  }
+
+  return legacyMigrationPromise;
+}
+
+async function getRepository() {
+  const repository = getReportRepository();
+  await migrateLegacyJsonReportsToDatabase();
+  return repository;
+}
 
 export async function createStoredReport(input: {
   fileName: string;
@@ -20,14 +86,14 @@ export async function createStoredReport(input: {
   const id = randomUUID();
   const createdAt = new Date();
   const extension = path.extname(input.fileName) || ".pdf";
-  const fileKey = buildStorageKey({
+  const sourceFileKey = buildStorageKey({
     category: "upload",
     reportId: id,
     fileName: input.fileName,
     extension,
     createdAt,
   });
-  const reportKey = buildStorageKey({
+  const analysisFileKey = buildStorageKey({
     category: "report",
     reportId: id,
     fileName: input.fileName,
@@ -35,64 +101,78 @@ export async function createStoredReport(input: {
     createdAt,
   });
 
-  await writeStoredFile(fileKey, input.bytes, "upload");
+  await writeStoredFile(sourceFileKey, input.bytes, "upload");
 
-  const report: StoredReport = {
-    id,
-    fileName: input.fileName,
-    storageMode: getStorageMode(),
-    fileKey,
-    reportKey,
-    mimeType: input.mimeType,
-    fileSize: input.fileSize,
-    createdAt: createdAt.toISOString(),
-    updatedAt: createdAt.toISOString(),
-    status: "analyzing",
-    patientName: null,
-    examDate: null,
-    institution: null,
-    summary: null,
-    errorMessage: null,
-    analysis: null,
-  };
-
-  await saveReport(report);
-  return report;
+  try {
+    return await getReportRepository().createMetadata({
+      id,
+      fileName: input.fileName,
+      storageMode: getStorageMode(),
+      sourceFilePath: getStoragePath(sourceFileKey, "upload"),
+      analysisFilePath: getStoragePath(analysisFileKey, "report"),
+      mimeType: input.mimeType,
+      fileSize: input.fileSize,
+      createdAt: createdAt.toISOString(),
+      updatedAt: createdAt.toISOString(),
+      status: "analyzing",
+    });
+  } catch (error) {
+    await deleteStoredFile(sourceFileKey, "upload");
+    throw error;
+  }
 }
 
 export async function saveReport(report: StoredReport) {
-  await writeStoredFile(
-    report.reportKey,
-    JSON.stringify(normalizeStoredReport(report), null, 2),
-    "report",
-  );
+  const normalized = normalizeStoredReport(report);
+
+  if (normalized.analysis) {
+    await writeStoredFile(
+      getStorageKeyFromPath(normalized.analysisFilePath, "report"),
+      JSON.stringify(normalized.analysis, null, 2),
+      "report",
+    );
+  }
+
+  await getReportRepository().save({
+    ...normalized,
+    analysis: null,
+  });
 }
 
 export async function getReport(reportId: string) {
-  const reports = await listReports();
-  const report = reports.find((item) => item.id === reportId);
+  const repository = await getRepository();
+  const metadata = await repository.findById(reportId);
 
-  if (!report) {
+  if (!metadata) {
     throw new Error("Report not found");
   }
 
+  const report = await hydrateReportAnalysis(metadata);
   return report;
 }
 
 export async function listReports() {
-  const keys = await listStoredKeys("report");
-  const records = await Promise.all(
-    keys
-      .filter((key) => key.endsWith(".json"))
-      .map(async (key) => {
-        const content = await readStoredFile(key, "report");
-        return normalizeStoredReport(JSON.parse(content.toString("utf8")) as StoredReport);
-      }),
+  const repository = await getRepository();
+  const reports = await repository.list();
+  await Promise.all(
+    reports.map(async (report) => {
+      if (report.status !== "succeeded") {
+        return;
+      }
+
+      const hydrated = await hydrateReportAnalysis(report);
+      if (
+        hydrated.analysis &&
+        (report.analysisModel !== hydrated.analysis.model ||
+          report.overallRiskLevel !== hydrated.analysis.executiveSummary.overallRiskLevel ||
+          report.riskScore !== hydrated.analysis.executiveSummary.riskScore)
+      ) {
+        await saveReport(hydrated);
+      }
+    }),
   );
 
-  return records.sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  );
+  return repository.list();
 }
 
 export async function updateReport(
@@ -111,12 +191,48 @@ export async function updateReport(
 export async function deleteReport(reportId: string) {
   const report = await getReport(reportId);
   await Promise.all([
-    deleteStoredFile(report.fileKey, "upload"),
-    deleteStoredFile(report.reportKey, "report"),
+    deleteStoredFile(getStorageKeyFromPath(report.sourceFilePath, "upload"), "upload"),
+    deleteStoredFile(getStorageKeyFromPath(report.analysisFilePath, "report"), "report"),
+    getReportRepository().delete(reportId),
   ]);
 }
 
 export function toPublicReport(report: StoredReport): PublicReport {
-  const { fileKey, reportKey, analysis, ...publicReport } = report;
+  const {
+    sourceFilePath,
+    analysisFilePath,
+    analysis,
+    ...publicReport
+  } = report;
   return publicReport;
+}
+
+async function hydrateReportAnalysis(report: StoredReport) {
+  if (report.analysis || report.status !== "succeeded") {
+    return report;
+  }
+
+  try {
+    const content = await readStoredFile(
+      getStorageKeyFromPath(report.analysisFilePath, "report"),
+      "report",
+    );
+    const parsed = JSON.parse(content.toString("utf8")) as unknown;
+    const analysis = (
+      parsed &&
+      typeof parsed === "object" &&
+      "analysis" in parsed &&
+      (parsed as { analysis?: unknown }).analysis &&
+      typeof (parsed as { analysis?: unknown }).analysis === "object"
+        ? (parsed as { analysis: unknown }).analysis
+        : parsed
+    ) as HealthReportAnalysis;
+
+    return normalizeStoredReport({
+      ...report,
+      analysis,
+    });
+  } catch {
+    return report;
+  }
 }

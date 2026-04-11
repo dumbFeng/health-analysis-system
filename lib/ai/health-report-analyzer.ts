@@ -96,6 +96,16 @@ export async function analyzeStoredReport(reportId: string) {
 }
 
 export function enqueueReportAnalysis(reportId: string) {
+  const taskId = `analyze:${reportId}`;
+
+  if (analysisQueue.hasTask(taskId)) {
+    void logger.info("报告分析任务已在队列中，跳过重复入队", {
+      reportId,
+      queue: analysisQueue.getStats(),
+    });
+    return false;
+  }
+
   if (analysisQueue.isFull()) {
     void logger.error("报告分析任务入队失败：分析队列已满", {
       reportId,
@@ -107,7 +117,7 @@ export function enqueueReportAnalysis(reportId: string) {
       errorMessage: "分析任务繁忙，请稍后重试。",
       analysis: null,
     }));
-    return;
+    return false;
   }
 
   void logger.info("报告分析任务已入队", {
@@ -115,11 +125,13 @@ export function enqueueReportAnalysis(reportId: string) {
     queue: analysisQueue.getStats(),
   });
 
-  void analysisQueue.enqueue(`analyze:${reportId}`, async () => {
+  void analysisQueue.enqueue(taskId, async () => {
     await logger.info("报告分析任务开始执行", {
       reportId,
       queue: analysisQueue.getStats(),
     });
     await analyzeStoredReport(reportId);
   });
+
+  return true;
 }
