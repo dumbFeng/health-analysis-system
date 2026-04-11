@@ -1,5 +1,4 @@
-import { basename } from "node:path";
-import OpenAI, { toFile } from "openai";
+import { createPartFromBase64, GoogleGenAI } from "@google/genai";
 import {
   buildHealthReportAnalysisInstructions,
   buildHealthReportAnalysisUserPrompt,
@@ -14,32 +13,52 @@ import type {
 import type { HealthReportAnalysis } from "@/lib/report-types";
 import { readStoredFile } from "@/lib/storage-provider";
 
-const OPENAI_API_BASE = "https://api.openai.com/v1";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 
-export class OpenAIHealthReportProvider implements HealthReportAiProvider {
-  readonly providerName = "openai";
+function extractJsonBlock(text: string) {
+  const normalized = text.trim();
+  const fenced = normalized.match(/```json\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+
+  const start = normalized.indexOf("{");
+  const end = normalized.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    return normalized.slice(start, end + 1);
+  }
+
+  return normalized;
+}
+
+export class GeminiHealthReportProvider implements HealthReportAiProvider {
+  readonly providerName = "gemini";
   readonly modelName: string;
   private readonly apiKey: string;
   private readonly baseUrl: string;
 
   constructor(input?: { apiKey?: string; modelName?: string; baseUrl?: string }) {
-    this.apiKey = input?.apiKey || process.env.OPENAI_API_KEY || "";
+    this.apiKey =
+      input?.apiKey ||
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_API_KEY ||
+      "";
     this.modelName =
       input?.modelName ||
-      process.env.OPENAI_MODEL ||
+      process.env.GEMINI_MODEL ||
       process.env.AI_MODEL ||
-      "gpt-5.4-mini";
-    this.baseUrl =
-      input?.baseUrl ||
-      process.env.OPENAI_BASE_URL ||
-      process.env.AI_BASE_URL ||
-      OPENAI_API_BASE;
+      DEFAULT_GEMINI_MODEL;
+    this.baseUrl = input?.baseUrl || process.env.GEMINI_BASE_URL || "";
   }
 
   private createClient() {
-    return new OpenAI({
+    return new GoogleGenAI({
       apiKey: this.apiKey,
-      baseURL: this.baseUrl,
+      httpOptions: this.baseUrl
+        ? {
+            baseUrl: this.baseUrl,
+          }
+        : undefined,
     });
   }
 
@@ -48,11 +67,11 @@ export class OpenAIHealthReportProvider implements HealthReportAiProvider {
     const warnings: string[] = [];
 
     if (!this.apiKey) {
-      issues.push("缺少 OpenAI apiKey，请在 AI_PROVIDER_CHAIN 中配置 apiKey。");
+      issues.push("缺少 Gemini apiKey，请在 AI_PROVIDER_CHAIN 中配置 apiKey。");
     }
 
     if (!this.modelName) {
-      issues.push("未配置 OpenAI 模型。");
+      issues.push("未配置 Gemini 模型。");
     }
 
     return {
@@ -77,13 +96,19 @@ export class OpenAIHealthReportProvider implements HealthReportAiProvider {
         checkedAt: new Date().toISOString(),
         issues: validation.issues,
         warnings: validation.warnings,
-        message: "AI 配置不完整，当前无法执行报告分析。",
+        message: "Gemini 配置不完整，当前无法执行报告分析。",
       };
     }
 
     try {
       const client = this.createClient();
-      await client.models.retrieve(this.modelName);
+      await client.models.generateContent({
+        model: this.modelName,
+        contents: "Return the word ok.",
+        config: {
+          temperature: 0,
+        },
+      });
 
       return {
         status: "healthy",
@@ -94,7 +119,7 @@ export class OpenAIHealthReportProvider implements HealthReportAiProvider {
         checkedAt: new Date().toISOString(),
         issues: [],
         warnings: validation.warnings,
-        message: "AI Provider 配置完整，且模型连通性正常。",
+        message: "Gemini Provider 配置完整，且模型连通性正常。",
       };
     } catch (error) {
       return {
@@ -107,10 +132,10 @@ export class OpenAIHealthReportProvider implements HealthReportAiProvider {
         issues: [
           error instanceof Error
             ? error.message
-            : "AI 健康检查失败，无法确认连通性。",
+            : "Gemini 健康检查失败，无法确认连通性。",
         ],
         warnings: validation.warnings,
-        message: "配置完整，但当前健康检查请求失败。",
+        message: "配置完整，但当前 Gemini 健康检查请求失败。",
       };
     }
   }
@@ -122,63 +147,42 @@ export class OpenAIHealthReportProvider implements HealthReportAiProvider {
     }
   }
 
-  private async uploadPdf(report: AnalyzeHealthReportInput["report"]) {
-    const client = this.createClient();
-    const buffer = await readStoredFile(report.fileKey, "upload");
-    const file = await toFile(buffer, basename(report.fileKey), {
-      type: report.mimeType || "application/pdf",
-    });
-    const uploaded = await client.files.create({
-      file,
-      purpose: "user_data",
-    });
-
-    return uploaded.id;
-  }
-
   async analyzeHealthReport({
     report,
   }: AnalyzeHealthReportInput): Promise<HealthReportAnalysis> {
     this.ensureReady();
 
     const client = this.createClient();
-    const fileId = await this.uploadPdf(report);
+    const buffer = await readStoredFile(report.fileKey, "upload");
+    const pdfPart = createPartFromBase64(
+      Buffer.from(buffer).toString("base64"),
+      report.mimeType || "application/pdf",
+    );
 
-    const response = await client.responses.create({
+    const response = await client.models.generateContent({
       model: this.modelName,
-      store: false,
-      instructions: buildHealthReportAnalysisInstructions(),
-      input: [
+      contents: [
+        pdfPart,
         {
-          role: "user",
-          content: [
-            {
-              type: "input_file",
-              file_id: fileId,
-            },
-            {
-              type: "input_text",
-              text: buildHealthReportAnalysisUserPrompt({
-                reportId: report.id,
-                fileName: report.fileName,
-              }),
-            },
-          ],
+          text: buildHealthReportAnalysisUserPrompt({
+            reportId: report.id,
+            fileName: report.fileName,
+          }),
         },
       ],
-      text: {
-        format: {
-          type: "json_schema",
-          ...healthReportAnalysisSchema,
-        },
+      config: {
+        temperature: 0.1,
+        systemInstruction: buildHealthReportAnalysisInstructions(),
+        responseMimeType: "application/json",
+        responseJsonSchema: healthReportAnalysisSchema.schema,
       },
     });
 
-    const outputText = response.output_text?.trim();
+    const outputText = response.text?.trim();
     if (!outputText) {
-      throw new Error("OpenAI 未返回可解析的结构化分析内容。");
+      throw new Error("Gemini 未返回可解析的结构化分析内容。");
     }
 
-    return JSON.parse(outputText) as HealthReportAnalysis;
+    return JSON.parse(extractJsonBlock(outputText)) as HealthReportAnalysis;
   }
 }

@@ -7,6 +7,7 @@ export type AnalyzeHealthReportInput = {
 export type AiProviderConfig = {
   provider: string;
   model?: string;
+  apiKey?: string;
   baseUrl?: string;
 };
 

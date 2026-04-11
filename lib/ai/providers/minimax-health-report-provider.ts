@@ -168,7 +168,7 @@ export class MiniMaxHealthReportProvider implements HealthReportAiProvider {
     const warnings: string[] = [];
 
     if (!this.apiKey) {
-      issues.push("缺少 MiniMax 服务配置。");
+      issues.push("缺少 MiniMax apiKey，请在 AI_PROVIDER_CHAIN 中配置 apiKey。");
     }
 
     if (!this.modelName) {
