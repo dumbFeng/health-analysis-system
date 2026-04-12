@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ReportDetailToc } from "@/components/report-detail-toc";
+import { getCurrentAuthFromCookies } from "@/lib/auth/server";
 import { normalizeHealthReportAnalysis } from "@/lib/report-analysis-normalizer";
 import { getReport } from "@/lib/report-store";
 import type { HealthReportAnalysis, RiskLevel } from "@/lib/report-types";
@@ -29,9 +30,11 @@ const systemLabels: Record<HealthReportAnalysis["systemRisks"][number]["system"]
 
 function renderMetaRow(label: string, value: string | number) {
   return (
-    <div className="rounded-[1.3rem] bg-stone-50/90 px-4 py-4">
+    <div className="border-b border-stone-200/70 px-4 py-4 md:border-r xl:[&:nth-child(4n)]:border-r-0">
       <p className="text-xs tracking-[0.16em] text-stone-500 uppercase">{label}</p>
-      <p className="mt-2 text-sm leading-7 text-stone-700">{String(value || "未提取")}</p>
+      <p className="mt-2 break-words text-sm leading-7 text-stone-700 [overflow-wrap:anywhere]">
+        {String(value || "未提取")}
+      </p>
     </div>
   );
 }
@@ -97,9 +100,9 @@ function DetailSection({
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="glass scroll-mt-32 rounded-[2rem] p-6 sm:scroll-mt-36 sm:p-8 xl:scroll-mt-24">
+    <section id={id} className="scroll-mt-32 px-5 py-6 sm:scroll-mt-36 sm:px-6 sm:py-7 xl:scroll-mt-24">
       <p className="section-title">{title}</p>
-      <div className="mt-5">{children}</div>
+      <div className="mt-4">{children}</div>
     </section>
   );
 }
@@ -110,14 +113,15 @@ export default async function ReportDetailPage({
   searchParams: Promise<{ id?: string }>;
 }) {
   const { id } = await searchParams;
+  const auth = await getCurrentAuthFromCookies();
 
-  if (!id) {
+  if (!id || !auth) {
     notFound();
   }
 
   let report;
   try {
-    report = await getReport(id);
+    report = await getReport(id, auth.user.id);
   } catch {
     notFound();
   }
@@ -143,9 +147,9 @@ export default async function ReportDetailPage({
   ];
 
   return (
-    <main className="px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <section className="glass rounded-[2rem] p-6 sm:p-8 lg:p-10">
+    <main className="px-4 py-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-3">
+        <section className="border-b border-stone-200/70 py-5 sm:py-6 lg:py-8">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-4">
               <Link
@@ -156,10 +160,10 @@ export default async function ReportDetailPage({
               </Link>
               <div>
                 <p className="section-title">体检报告分析结果</p>
-                <h1 className="mt-2 text-4xl font-semibold tracking-tight text-stone-900">
+                <h1 className="mt-2 break-words text-4xl font-semibold tracking-tight text-stone-900 [overflow-wrap:anywhere]">
                   {analysis.patient.name || report.fileName}
                 </h1>
-                <p className="mt-3 max-w-3xl text-base leading-8 text-stone-700">
+                <p className="mt-3 max-w-3xl break-words text-base leading-8 text-stone-700 [overflow-wrap:anywhere]">
                   {analysis.executiveSummary.summary}
                 </p>
               </div>
@@ -183,7 +187,7 @@ export default async function ReportDetailPage({
             </div>
           </div>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-6 grid gap-0 overflow-hidden rounded-[1.4rem] border border-stone-200/70 bg-white/38 md:grid-cols-2 xl:grid-cols-4">
             {renderMetaRow("姓名", analysis.patient.name)}
             {renderMetaRow("性别 / 年龄", `${analysis.patient.gender} / ${analysis.patient.age}`)}
             {renderMetaRow("身高 / 体重", `${analysis.patient.heightCm} cm / ${analysis.patient.weightKg} kg`)}
@@ -195,12 +199,12 @@ export default async function ReportDetailPage({
           </div>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+        <section className="grid gap-3 xl:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="xl:sticky xl:top-6 xl:self-start">
             <ReportDetailToc sectionLinks={sectionLinks} />
           </aside>
 
-          <div className="space-y-6">
+          <div className="divide-y divide-stone-300/80">
             <DetailSection id="key-signals" title="关键提示">
               <div className="grid gap-4 md:grid-cols-3">
                 {analysis.executiveSummary.topSignals.map((signal) => (

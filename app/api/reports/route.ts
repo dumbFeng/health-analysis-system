@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ensureReportAnalysisRecovery } from "@/lib/ai/report-analysis-recovery";
+import { createUnauthorizedResponse, requireAuth } from "@/lib/auth/server";
 import {
   createStoredReport,
   deleteReport,
@@ -13,10 +14,15 @@ import { uploadQueue } from "@/lib/queue/report-queues";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuth(request).catch(() => null);
+  if (!auth) {
+    return createUnauthorizedResponse();
+  }
+
   await ensureReportAnalysisRecovery();
 
-  const reports = await listReports();
+  const reports = await listReports(auth.user.id);
   await logger.debug("查询报告列表", {
     count: reports.length,
   });
@@ -24,6 +30,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuth(request).catch(() => null);
+  if (!auth) {
+    return createUnauthorizedResponse();
+  }
+
   const formData = await request.formData();
   const file = formData.get("file");
 
@@ -66,6 +77,7 @@ export async function POST(request: Request) {
     });
 
     const createdReport = await createStoredReport({
+      userId: auth.user.id,
       fileName: file.name,
       mimeType: file.type || "application/pdf",
       fileSize: file.size,
@@ -93,6 +105,11 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const auth = await requireAuth(request).catch(() => null);
+  if (!auth) {
+    return createUnauthorizedResponse();
+  }
+
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
@@ -102,7 +119,7 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const report = await getReport(id);
+    const report = await getReport(id, auth.user.id);
     if (report.status === "analyzing") {
       await logger.warn("删除报告失败：报告仍在分析中", { reportId: id });
       return NextResponse.json(
@@ -111,7 +128,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    await deleteReport(id);
+    await deleteReport(id, auth.user.id);
   } catch (error) {
     await logger.warn("删除报告失败：报告不存在或删除异常", {
       reportId: id,

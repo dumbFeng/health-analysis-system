@@ -246,13 +246,13 @@ export function ReportDashboard({
   }
 
   return (
-    <main className="px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <section className="glass relative overflow-hidden rounded-[2rem] p-6 sm:p-8 lg:p-10">
-          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-r from-emerald-200/40 via-amber-100/30 to-orange-200/30 blur-3xl" />
+    <main className="px-4 py-4 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-7xl">
+        <section aria-label="体检报告分析">
+        <section className="relative overflow-hidden border-b border-stone-200/70 py-5 sm:py-6 lg:py-8">
+          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-r from-emerald-100/30 via-amber-50/35 to-orange-100/25 blur-3xl" />
           <div className="relative grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
             <div className="space-y-5">
-              <p className="section-title">Upload Health Reports</p>
               <div className="space-y-4">
                 <h1 className="max-w-4xl text-4xl leading-tight font-semibold tracking-tight text-stone-900 sm:text-5xl">
                   体检报告分析中心
@@ -296,8 +296,8 @@ export function ReportDashboard({
               </label>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-[1.2rem] bg-stone-900 px-4 py-4 text-stone-100">
-                  <p className="text-xs tracking-[0.16em] text-stone-300 uppercase">
+                <div className="rounded-[1.2rem] bg-sky-50 px-4 py-4 text-sky-900">
+                  <p className="text-xs tracking-[0.16em] text-sky-700 uppercase">
                     已上传
                   </p>
                   <p className="mt-2 text-3xl font-semibold">{reports.length}</p>
@@ -331,7 +331,7 @@ export function ReportDashboard({
           </div>
         </section>
 
-        <section className="glass rounded-[2rem] p-6 sm:p-8">
+        <section className="py-5 sm:py-6 lg:py-7">
           <div className="flex items-end justify-between gap-4">
             <div>
               <p className="section-title">报告列表</p>
@@ -351,7 +351,7 @@ export function ReportDashboard({
           </div>
 
           {reports.length > 0 ? (
-            <div className="mt-6 grid gap-3 md:grid-cols-2">
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
               <label className="rounded-[1.4rem] border border-stone-200/70 bg-white/75 px-4 py-3">
                 <span className="text-xs tracking-[0.16em] text-stone-500 uppercase">
                   受检人
@@ -393,21 +393,21 @@ export function ReportDashboard({
           ) : null}
 
           {reports.length === 0 ? (
-            <div className="mt-6 rounded-[1.6rem] border border-dashed border-stone-300 bg-white/55 px-6 py-12 text-center">
+            <div className="mt-4 rounded-[1.6rem] border border-dashed border-stone-300 bg-white/55 px-6 py-10 text-center">
               <h3 className="text-xl font-semibold text-stone-900">还没有上传记录</h3>
               <p className="mt-3 text-sm leading-7 text-stone-600">
                 从上面的上传入口选择 PDF 体检报告，系统会自动创建一张分析任务卡片。
               </p>
             </div>
           ) : filteredReports.length === 0 ? (
-            <div className="mt-6 rounded-[1.6rem] border border-dashed border-stone-300 bg-white/55 px-6 py-12 text-center">
+            <div className="mt-4 rounded-[1.6rem] border border-dashed border-stone-300 bg-white/55 px-6 py-10 text-center">
               <h3 className="text-xl font-semibold text-stone-900">没有符合筛选条件的报告</h3>
               <p className="mt-3 text-sm leading-7 text-stone-600">
                 可以切换受检人或分析状态，查看其他报告任务。
               </p>
             </div>
           ) : (
-            <div className="mt-6 grid grid-cols-2 gap-3 lg:gap-4">
+            <div className="mt-4 grid grid-cols-2 gap-3 lg:gap-4">
               {filteredReports.map((report) => {
                 const status = statusMeta[report.status];
 
@@ -581,6 +581,7 @@ export function ReportDashboard({
               })}
             </div>
           )}
+        </section>
         </section>
       </div>
 

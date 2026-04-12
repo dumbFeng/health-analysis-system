@@ -7,6 +7,7 @@ import type { ReportStatus, StorageMode, StoredReport } from "@/lib/report-types
 
 type ReportRow = {
   id: string;
+  owner_user_id: string | null;
   file_name: string;
   storage_mode: StorageMode;
   source_file_path: string;
@@ -174,6 +175,11 @@ function migrateLegacyStorageColumns(database: DatabaseSync) {
   }
 }
 
+function ensureReportOwnershipColumn(database: DatabaseSync) {
+  ensureColumn(database, "reports", "owner_user_id", "TEXT");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_reports_owner_user_id ON reports(owner_user_id);");
+}
+
 function getDatabase() {
   if (!database) {
     const databasePath = getSqlitePath();
@@ -184,6 +190,7 @@ function getDatabase() {
     database.exec(`
       CREATE TABLE IF NOT EXISTS reports (
         id TEXT PRIMARY KEY,
+        owner_user_id TEXT,
         file_name TEXT NOT NULL,
         storage_mode TEXT NOT NULL,
         source_file_path TEXT NOT NULL,
@@ -207,6 +214,7 @@ function getDatabase() {
       CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
     `);
     migrateLegacyStorageColumns(database);
+    ensureReportOwnershipColumn(database);
     ensureColumn(database, "reports", "analysis_model", "TEXT");
     ensureColumn(database, "reports", "overall_risk_level", "TEXT");
     ensureColumn(database, "reports", "risk_score", "INTEGER");
@@ -242,6 +250,7 @@ function assertRequiredReportMetadata(report: StoredReport) {
 function rowToReport(row: ReportRow): StoredReport {
   return normalizeStoragePaths(normalizeStoredReport({
     id: row.id,
+    userId: row.owner_user_id,
     fileName: row.file_name,
     storageMode: row.storage_mode,
     sourceFilePath: row.source_file_path,
@@ -267,6 +276,7 @@ export class SqliteReportRepository implements ReportRepository {
   async createMetadata(input: ReportMetadataInput): Promise<StoredReport> {
     const report: StoredReport = {
       id: input.id,
+      userId: input.userId,
       fileName: input.fileName,
       storageMode: input.storageMode,
       sourceFilePath: input.sourceFilePath,
@@ -294,16 +304,19 @@ export class SqliteReportRepository implements ReportRepository {
   async save(report: StoredReport) {
     const normalized = normalizeStoragePaths(normalizeStoredReport(report));
     assertRequiredReportMetadata(normalized);
-    getDatabase()
+    const database = getDatabase();
+    ensureReportOwnershipColumn(database);
+    database
       .prepare(`
         INSERT INTO reports (
-          id, file_name, storage_mode, source_file_path, analysis_file_path,
+          id, owner_user_id, file_name, storage_mode, source_file_path, analysis_file_path,
           mime_type, file_size, created_at, updated_at, status,
           patient_name, exam_date, institution, summary,
           analysis_model, overall_risk_level, risk_score, error_message
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
+          owner_user_id = excluded.owner_user_id,
           file_name = excluded.file_name,
           storage_mode = excluded.storage_mode,
           source_file_path = excluded.source_file_path,
@@ -324,6 +337,7 @@ export class SqliteReportRepository implements ReportRepository {
       `)
       .run(
         normalized.id,
+        normalized.userId,
         normalized.fileName,
         normalized.storageMode,
         normalized.sourceFilePath,
@@ -352,15 +366,47 @@ export class SqliteReportRepository implements ReportRepository {
     return row ? rowToReport(row) : null;
   }
 
-  async list() {
-    const rows = getDatabase()
-      .prepare("SELECT * FROM reports ORDER BY updated_at DESC")
-      .all() as ReportRow[];
+  async findByIdForUser(reportId: string, userId: string) {
+    const database = getDatabase();
+    ensureReportOwnershipColumn(database);
+    const row = database
+      .prepare("SELECT * FROM reports WHERE id = ? AND owner_user_id = ?")
+      .get(reportId, userId) as ReportRow | undefined;
+
+    return row ? rowToReport(row) : null;
+  }
+
+  async list(userId?: string) {
+    const database = getDatabase();
+    ensureReportOwnershipColumn(database);
+    const rows = userId
+      ? (database
+          .prepare("SELECT * FROM reports WHERE owner_user_id = ? ORDER BY updated_at DESC")
+          .all(userId) as ReportRow[])
+      : (database
+          .prepare("SELECT * FROM reports ORDER BY updated_at DESC")
+          .all() as ReportRow[]);
 
     return rows.map(rowToReport);
   }
 
-  async delete(reportId: string) {
-    getDatabase().prepare("DELETE FROM reports WHERE id = ?").run(reportId);
+  async delete(reportId: string, userId?: string) {
+    const database = getDatabase();
+    ensureReportOwnershipColumn(database);
+    if (userId) {
+      database.prepare("DELETE FROM reports WHERE id = ? AND owner_user_id = ?").run(reportId, userId);
+      return;
+    }
+
+    database.prepare("DELETE FROM reports WHERE id = ?").run(reportId);
+  }
+
+  async claimUnownedReports(userId: string) {
+    const database = getDatabase();
+    ensureReportOwnershipColumn(database);
+    const result = database
+      .prepare("UPDATE reports SET owner_user_id = ? WHERE owner_user_id IS NULL OR owner_user_id = ''")
+      .run(userId);
+    return Number(result.changes || 0);
   }
 }

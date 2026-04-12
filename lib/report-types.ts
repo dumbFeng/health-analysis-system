@@ -125,6 +125,7 @@ export type HealthReportAnalysis = {
 
 export type StoredReport = {
   id: string;
+  userId: string | null;
   fileName: string;
   storageMode: StorageMode;
   sourceFilePath: string;
@@ -149,5 +150,6 @@ export type PublicReport = Omit<
   StoredReport,
   | "sourceFilePath"
   | "analysisFilePath"
+  | "userId"
   | "analysis"
 >;

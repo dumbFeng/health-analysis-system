@@ -78,6 +78,7 @@ async function getRepository() {
 }
 
 export async function createStoredReport(input: {
+  userId: string;
   fileName: string;
   mimeType: string;
   fileSize: number;
@@ -106,6 +107,7 @@ export async function createStoredReport(input: {
   try {
     return await getReportRepository().createMetadata({
       id,
+      userId: input.userId,
       fileName: input.fileName,
       storageMode: getStorageMode(),
       sourceFilePath: getStoragePath(sourceFileKey, "upload"),
@@ -139,9 +141,11 @@ export async function saveReport(report: StoredReport) {
   });
 }
 
-export async function getReport(reportId: string) {
+export async function getReport(reportId: string, userId?: string) {
   const repository = await getRepository();
-  const metadata = await repository.findById(reportId);
+  const metadata = userId
+    ? await repository.findByIdForUser(reportId, userId)
+    : await repository.findById(reportId);
 
   if (!metadata) {
     throw new Error("Report not found");
@@ -151,9 +155,9 @@ export async function getReport(reportId: string) {
   return report;
 }
 
-export async function listReports() {
+export async function listReports(userId?: string) {
   const repository = await getRepository();
-  const reports = await repository.list();
+  const reports = await repository.list(userId);
   await Promise.all(
     reports.map(async (report) => {
       if (report.status !== "succeeded") {
@@ -172,14 +176,15 @@ export async function listReports() {
     }),
   );
 
-  return repository.list();
+  return repository.list(userId);
 }
 
 export async function updateReport(
   reportId: string,
   updater: (report: StoredReport) => StoredReport,
+  userId?: string,
 ) {
-  const current = await getReport(reportId);
+  const current = await getReport(reportId, userId);
   const next = updater({
     ...current,
     updatedAt: new Date().toISOString(),
@@ -188,22 +193,28 @@ export async function updateReport(
   return next;
 }
 
-export async function deleteReport(reportId: string) {
-  const report = await getReport(reportId);
+export async function deleteReport(reportId: string, userId?: string) {
+  const report = await getReport(reportId, userId);
   await Promise.all([
     deleteStoredFile(getStorageKeyFromPath(report.sourceFilePath, "upload"), "upload"),
     deleteStoredFile(getStorageKeyFromPath(report.analysisFilePath, "report"), "report"),
-    getReportRepository().delete(reportId),
+    getReportRepository().delete(reportId, userId),
   ]);
+}
+
+export async function claimUnownedReports(userId: string) {
+  return getReportRepository().claimUnownedReports(userId);
 }
 
 export function toPublicReport(report: StoredReport): PublicReport {
   const {
     sourceFilePath,
     analysisFilePath,
+    userId,
     analysis,
     ...publicReport
   } = report;
+  void userId;
   return publicReport;
 }
 

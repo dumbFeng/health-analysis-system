@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 type SectionLink = {
   id: string;
@@ -14,7 +14,6 @@ type ReportDetailTocProps = {
 export function ReportDetailToc({ sectionLinks }: ReportDetailTocProps) {
   const [activeId, setActiveId] = useState(sectionLinks[0]?.id ?? "");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const itemRefs = useRef<Record<string, HTMLAnchorElement | null>>({});
 
   function handleNavigate(event: React.MouseEvent<HTMLAnchorElement>, id: string) {
     event.preventDefault();
@@ -98,19 +97,6 @@ export function ReportDetailToc({ sectionLinks }: ReportDetailTocProps) {
     };
   }, [sectionLinks]);
 
-  useEffect(() => {
-    const activeItem = itemRefs.current[activeId];
-    if (!activeItem) {
-      return;
-    }
-
-    activeItem.scrollIntoView({
-      block: "nearest",
-      inline: "center",
-      behavior: "smooth",
-    });
-  }, [activeId]);
-
   function renderLinks(mode: "mobile" | "desktop") {
     return sectionLinks.map((item) => {
       const isActive = item.id === activeId;
@@ -118,12 +104,6 @@ export function ReportDetailToc({ sectionLinks }: ReportDetailTocProps) {
       return (
         <a
           key={`${mode}-${item.id}`}
-          ref={(node) => {
-            itemRefs.current[`${mode}:${item.id}`] = node;
-            if (mode === "desktop") {
-              itemRefs.current[item.id] = node;
-            }
-          }}
           href={`#${item.id}`}
           aria-current={isActive ? "location" : undefined}
           onClick={(event) => handleNavigate(event, item.id)}
@@ -175,9 +155,9 @@ export function ReportDetailToc({ sectionLinks }: ReportDetailTocProps) {
       </div>
 
       <div className="hidden xl:block">
-        <div className="glass sticky top-6 z-30 rounded-[2rem] p-5">
+        <div className="glass sticky top-6 z-30 rounded-[1.8rem] p-4 shadow-[0_18px_48px_rgba(73,54,34,0.08)]">
           <p className="section-title">快捷导航</p>
-          <nav className="mt-4 flex flex-col gap-2">{renderLinks("desktop")}</nav>
+          <nav className="mt-3 flex flex-col gap-1.5">{renderLinks("desktop")}</nav>
         </div>
       </div>
     </>

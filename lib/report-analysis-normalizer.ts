@@ -579,6 +579,7 @@ export function normalizeStoredReport(report: StoredReport): StoredReport {
   if (!report.analysis) {
     return {
       ...reportWithStorage,
+      userId: typeof report.userId === "string" ? report.userId : null,
       analysisModel:
         typeof report.analysisModel === "string" ? report.analysisModel : null,
       overallRiskLevel:
@@ -598,6 +599,7 @@ export function normalizeStoredReport(report: StoredReport): StoredReport {
 
   return {
     ...reportWithStorage,
+    userId: typeof report.userId === "string" ? report.userId : null,
     patientName: analysis.patient.name || report.patientName,
     examDate: analysis.reportMeta.examDate || report.examDate,
     institution: analysis.reportMeta.institution || report.institution,

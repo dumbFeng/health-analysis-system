@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { getAiHealthStatus } from "@/lib/ai/ai-health";
+import { createUnauthorizedResponse, requireAuth } from "@/lib/auth/server";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuth(request).catch(() => null);
+  if (!auth) {
+    return createUnauthorizedResponse();
+  }
+
   const health = await getAiHealthStatus();
   await logger.debug("AI 健康检查", {
     status: health.status,

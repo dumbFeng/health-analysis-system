@@ -11,15 +11,49 @@ import type {
 import type { HealthReportAnalysis } from "@/lib/report-types";
 import { extractPdfText } from "@/lib/pdf-text-extractor";
 
-const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
+const DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/anthropic";
 
-type MiniMaxChatResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
+type MiniMaxMessageResponse = {
+  content?: Array<
+    | {
+        type?: "text";
+        text?: string;
+      }
+    | {
+        type?: "thinking";
+        thinking?: string;
+      }
+    | Record<string, unknown>
+  >;
+  error?: {
+    type?: string;
+    message?: string;
+  };
 };
+
+function readPositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(value || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function extractTextContent(payload: MiniMaxMessageResponse) {
+  return (payload.content ?? [])
+    .map((block) => {
+      if (
+        block &&
+        typeof block === "object" &&
+        "text" in block &&
+        typeof block.text === "string"
+      ) {
+        return block.text;
+      }
+
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
 
 function extractJsonBlock(text: string) {
   const normalized = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
@@ -89,16 +123,38 @@ function sanitizeJsonCandidate(text: string) {
   return text
     .replace(/\u201c|\u201d/g, "\"")
     .replace(/\u2018|\u2019/g, "'")
+    .replace(/：/g, ":")
+    .replace(/，/g, ",")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    .replace(/\/\/.*$/gm, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/,\s*([}\]])/g, "$1")
     .trim();
 }
 
+function quoteBareJsonKeys(text: string) {
+  return text.replace(/([{,]\s*)([A-Za-z0-9_\u4e00-\u9fa5-]+)\s*:/g, '$1"$2":');
+}
+
+function normalizeSingleQuotedStrings(text: string) {
+  return text.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, content: string) => {
+    const escaped = content.replace(/"/g, '\\"');
+    return `"${escaped}"`;
+  });
+}
+
 function parseJsonWithRepairAttempts(text: string) {
-  const candidates = [text, sanitizeJsonCandidate(text)];
+  const sanitized = sanitizeJsonCandidate(text);
+  const candidates = [
+    text,
+    sanitized,
+    quoteBareJsonKeys(sanitized),
+    normalizeSingleQuotedStrings(sanitized),
+    normalizeSingleQuotedStrings(quoteBareJsonKeys(sanitized)),
+  ];
   let lastError: Error | null = null;
 
-  for (const candidate of candidates) {
+  for (const candidate of Array.from(new Set(candidates))) {
     try {
       return JSON.parse(candidate) as unknown;
     } catch (error) {
@@ -148,19 +204,26 @@ export class MiniMaxHealthReportProvider implements HealthReportAiProvider {
   readonly modelName: string;
   private readonly apiKey: string;
   private readonly baseUrl: string;
+  private readonly maxTokens: number;
 
   constructor(input?: { apiKey?: string; modelName?: string; baseUrl?: string }) {
-    this.apiKey = input?.apiKey || process.env.MINIMAX_API_KEY || "";
+    this.apiKey =
+      input?.apiKey ||
+      process.env.MINIMAX_API_KEY ||
+      process.env.ANTHROPIC_API_KEY ||
+      "";
     this.modelName =
       input?.modelName ||
       process.env.MINIMAX_MODEL ||
       process.env.AI_MODEL ||
-      "MiniMax-M2.5";
+      "MiniMax-M2.7";
     this.baseUrl =
       input?.baseUrl ||
       process.env.MINIMAX_BASE_URL ||
+      process.env.ANTHROPIC_BASE_URL ||
       process.env.AI_BASE_URL ||
       DEFAULT_MINIMAX_BASE_URL;
+    this.maxTokens = readPositiveInteger(process.env.MINIMAX_MAX_TOKENS, 20000);
   }
 
   validateConfig(): AiConfigValidationResult {
@@ -202,25 +265,22 @@ export class MiniMaxHealthReportProvider implements HealthReportAiProvider {
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/models`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
+      const payload = await this.createMessage(
+        [
+          {
+            role: "user",
+            content: "请回复 ok。",
+          },
+        ],
+        {
+          system: "你是健康检查助手。只回复 ok。",
+          maxTokens: 16,
         },
-      });
+      );
 
-      if (!response.ok) {
-        return {
-          status: "degraded",
-          providerName: this.providerName,
-          modelName: this.modelName,
-          configured: true,
-          live: false,
-          checkedAt: new Date().toISOString(),
-          issues: [`MiniMax 健康检查失败: ${await response.text()}`],
-          warnings: validation.warnings,
-          message: "配置完整，但当前无法确认模型可用性。",
-        };
+      const content = extractTextContent(payload).trim();
+      if (!content) {
+        throw new Error("MiniMax 健康检查未返回文本内容。");
       }
 
       return {
@@ -260,40 +320,66 @@ export class MiniMaxHealthReportProvider implements HealthReportAiProvider {
     }
   }
 
-  private async createChatCompletion(messages: Array<{ role: "system" | "user"; content: string }>) {
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+  private getMessagesEndpoint() {
+    const normalized = this.baseUrl.replace(/\/+$/g, "");
+    if (normalized.endsWith("/v1")) {
+      return `${normalized}/messages`;
+    }
+
+    return `${normalized}/v1/messages`;
+  }
+
+  private async createMessage(
+    messages: Array<{ role: "user" | "assistant"; content: string }>,
+    options?: { system?: string; maxTokens?: number },
+  ) {
+    const response = await fetch(this.getMessagesEndpoint(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model: this.modelName,
+        max_tokens: options?.maxTokens || this.maxTokens,
         temperature: 0.1,
-        messages,
-        response_format: {
-          type: "json_object",
-        },
+        system: options?.system,
+        messages: messages.map((message) => ({
+          role: message.role,
+          content: [
+            {
+              type: "text",
+              text: message.content,
+            },
+          ],
+        })),
       }),
     });
 
-    if (!response.ok) {
-      throw new Error(`MiniMax 分析请求失败: ${await response.text()}`);
+    const rawText = await response.text();
+    let data: MiniMaxMessageResponse = {};
+
+    try {
+      data = rawText ? (JSON.parse(rawText) as MiniMaxMessageResponse) : {};
+    } catch {
+      data = {};
     }
 
-    return (await response.json()) as MiniMaxChatResponse;
+    if (!response.ok || data.error) {
+      const detail = data.error?.message || rawText;
+      throw new Error(`MiniMax 请求失败: ${detail || response.statusText}`);
+    }
+
+    return data;
   }
 
   private async repairMalformedJson(rawContent: string, parseError: Error) {
-    const payload = await this.createChatCompletion([
-      {
-        role: "system",
-        content:
-          "你是 JSON 修复器。你的任务是把用户提供的内容修复成单个合法 JSON 对象。不要输出解释、Markdown 或代码块，只输出 JSON。",
-      },
-      {
-        role: "user",
-        content: `下面这段内容本应是健康报告分析 JSON，但当前无法解析。
+    const payload = await this.createMessage(
+      [
+        {
+          role: "user",
+          content: `下面这段内容本应是健康报告分析 JSON，但当前无法解析。
 
 解析错误：
 ${parseError.message}
@@ -302,10 +388,16 @@ ${parseError.message}
 
 原始内容：
 ${rawContent}`,
+        },
+      ],
+      {
+        system:
+          "你是 JSON 修复器。你的任务是把用户提供的内容修复成单个合法 JSON 对象。不要输出解释、Markdown 或代码块，只输出 JSON。",
+        maxTokens: this.maxTokens,
       },
-    ]);
+    );
 
-    const repaired = payload.choices?.[0]?.message?.content?.trim();
+    const repaired = extractTextContent(payload).trim();
     if (!repaired) {
       throw new Error(`MiniMax JSON 修复失败：${parseError.message}`);
     }
@@ -332,18 +424,20 @@ ${rawContent}`,
 
 ${extracted.text}`;
 
-    const payload = await this.createChatCompletion([
+    const payload = await this.createMessage(
+      [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
       {
-        role: "system",
-        content: `${buildHealthReportAnalysisInstructions()} 输出必须是纯 JSON，不要添加解释性前后缀。`,
+        system: `${buildHealthReportAnalysisInstructions()} 输出必须是纯 JSON，不要添加解释性前后缀。`,
+        maxTokens: this.maxTokens,
       },
-      {
-        role: "user",
-        content: prompt,
-      },
-    ]);
+    );
 
-    const content = payload.choices?.[0]?.message?.content?.trim();
+    const content = extractTextContent(payload).trim();
     if (!content) {
       throw new Error("MiniMax 未返回可解析的结构化分析内容。");
     }

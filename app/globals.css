@@ -2,6 +2,10 @@
 
 :root {
   --bg: #f5efe4;
+  --app-background:
+    radial-gradient(circle at top left, rgba(251, 213, 161, 0.45), transparent 26%),
+    radial-gradient(circle at top right, rgba(129, 186, 152, 0.35), transparent 24%),
+    linear-gradient(180deg, #fbf3e6 0%, #f5efe4 48%, #f0e9dc 100%);
   --panel: rgba(255, 251, 245, 0.82);
   --panel-strong: #fffaf1;
   --text: #1f1c18;
@@ -28,12 +32,16 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--text);
-  background:
-    radial-gradient(circle at top left, rgba(251, 213, 161, 0.45), transparent 26%),
-    radial-gradient(circle at top right, rgba(129, 186, 152, 0.35), transparent 24%),
-    linear-gradient(180deg, #fbf3e6 0%, #f5efe4 48%, #f0e9dc 100%);
+  background: var(--app-background);
+  background-attachment: fixed;
   font-family:
     "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+}
+
+@media (max-width: 767px) {
+  body {
+    background-attachment: scroll;
+  }
 }
 
 a {

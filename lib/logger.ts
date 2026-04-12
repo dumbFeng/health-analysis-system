@@ -6,6 +6,13 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogContext = Record<string, unknown>;
 
 const logsRoot = path.join(process.cwd(), "storage", "logs");
+const terminalLevelColor: Record<LogLevel, string> = {
+  error: "\x1b[31m",
+  warn: "\x1b[33m",
+  info: "\x1b[37m",
+  debug: "\x1b[32m",
+};
+const terminalColorReset = "\x1b[0m";
 
 function getLogFilePath(date = new Date()) {
   const yyyy = String(date.getUTCFullYear());
@@ -43,6 +50,10 @@ function createLogLine(level: LogLevel, message: string, context?: LogContext) {
   return JSON.stringify(payload);
 }
 
+function colorizeTerminalLogLine(level: LogLevel, line: string) {
+  return `${terminalLevelColor[level]}${line}${terminalColorReset}`;
+}
+
 export async function writeLog(
   level: LogLevel,
   message: string,
@@ -57,13 +68,14 @@ export async function writeLog(
       : context;
 
   const line = createLogLine(level, message, normalizedContext);
+  const terminalLine = colorizeTerminalLogLine(level, line);
 
   if (level === "error") {
-    console.error(line);
+    console.error(terminalLine);
   } else if (level === "warn") {
-    console.warn(line);
+    console.warn(terminalLine);
   } else {
-    console.log(line);
+    console.log(terminalLine);
   }
 
   try {
