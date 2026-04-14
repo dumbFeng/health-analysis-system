@@ -3,10 +3,13 @@ import { authCookieName, verifyAuthToken } from "@/lib/auth/jwt";
 
 const publicPrefixes = [
   "/login",
+  "/admin/login",
   "/api/auth/request-code",
   "/api/auth/login",
   "/api/auth/email/request-code",
   "/api/auth/email/login",
+  "/api/auth/email/complete-signup",
+  "/api/auth/invite-code/status",
   "/api/auth/logout",
   "/api/auth/wechat/start",
   "/api/auth/wechat/callback",
@@ -35,7 +38,7 @@ export async function proxy(request: NextRequest) {
   }
 
   const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = "/login";
+  loginUrl.pathname = pathname.startsWith("/admin") ? "/admin/login" : "/login";
   loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
   return NextResponse.redirect(loginUrl);
 }

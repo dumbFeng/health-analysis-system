@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAuthDevReturnCode } from "@/lib/auth/auth-config";
 import { isValidEmail, normalizeEmail } from "@/lib/auth/email";
 import { createEmailLoginCode } from "@/lib/auth/sqlite-auth-repository";
 import {
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
       devCode:
         process.env.NODE_ENV !== "production" &&
         (getEmailProviderName() === "dev" ||
-          process.env.AUTH_DEV_RETURN_CODE === "true")
+          getAuthDevReturnCode())
           ? loginCode.code
           : undefined,
     });

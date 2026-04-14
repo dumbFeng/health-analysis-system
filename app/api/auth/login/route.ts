@@ -5,7 +5,6 @@ import {
   getOrCreateUserByPhone,
 } from "@/lib/auth/sqlite-auth-repository";
 import { setAuthCookie } from "@/lib/auth/server";
-import { claimUnownedReports } from "@/lib/report-store";
 
 export const runtime = "nodejs";
 
@@ -26,7 +25,6 @@ export async function POST(request: Request) {
   }
 
   const { user } = getOrCreateUserByPhone(phone);
-  await claimUnownedReports(user.id);
 
   const response = NextResponse.json({
     user: {

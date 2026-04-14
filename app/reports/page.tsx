@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ReportDetailScrollReset } from "@/components/report-detail-scroll-reset";
 import { ReportDetailToc } from "@/components/report-detail-toc";
 import { getCurrentAuthFromCookies } from "@/lib/auth/server";
 import { normalizeHealthReportAnalysis } from "@/lib/report-analysis-normalizer";
@@ -100,8 +101,19 @@ function DetailSection({
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="scroll-mt-32 px-5 py-6 sm:scroll-mt-36 sm:px-6 sm:py-7 xl:scroll-mt-24">
-      <p className="section-title">{title}</p>
+    <section
+      id={id}
+      className="relative scroll-mt-32 py-6 pl-10 sm:scroll-mt-36 sm:py-7 sm:pl-11 xl:scroll-mt-24"
+    >
+      <div className="relative min-h-6 before:pointer-events-none before:absolute before:top-1/2 before:-left-[31px] before:h-6 before:w-[2px] before:-translate-y-1/2 before:bg-[var(--bg)] sm:before:-left-[35px]">
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 -left-[31px] h-3.5 w-3.5 -translate-y-1/2 rounded-full border-2 border-emerald-700/55 bg-[var(--panel-strong)] sm:-left-[35px]"
+        />
+        <h2 className="text-lg leading-6 font-semibold text-stone-950 sm:text-xl">
+          {title}
+        </h2>
+      </div>
       <div className="mt-4">{children}</div>
     </section>
   );
@@ -148,6 +160,7 @@ export default async function ReportDetailPage({
 
   return (
     <main className="px-4 py-4 sm:px-6 lg:px-8">
+      <ReportDetailScrollReset />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-3">
         <section className="border-b border-stone-200/70 py-5 sm:py-6 lg:py-8">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -204,7 +217,7 @@ export default async function ReportDetailPage({
             <ReportDetailToc sectionLinks={sectionLinks} />
           </aside>
 
-          <div className="divide-y divide-stone-300/80">
+          <div className="relative before:pointer-events-none before:absolute before:top-2 before:right-0 before:bottom-2 before:left-[15px] before:w-[2px] before:bg-stone-300/95">
             <DetailSection id="key-signals" title="关键提示">
               <div className="grid gap-4 md:grid-cols-3">
                 {analysis.executiveSummary.topSignals.map((signal) => (

@@ -10,7 +10,10 @@ import {
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { getSqliteDatabasePath } from "@/lib/app-data-paths";
+import { isAdminEmail } from "@/lib/auth/admin-config";
 import { generateUsernameFromEmail, maskEmail, normalizeEmail } from "@/lib/auth/email";
+import { generateInviteCode, normalizeInviteCode } from "@/lib/auth/invite-code";
 import { generateUsername, maskPhone, normalizePhone } from "@/lib/auth/phone";
 import type { AuthIdentityType, AuthUser } from "@/lib/auth/types";
 
@@ -33,6 +36,33 @@ type LoginCodeRow = {
   attempt_count: number | null;
 };
 
+type InviteCodeRow = {
+  id: string;
+  code: string;
+  created_by_user_id: string;
+  max_uses: number;
+  used_count: number;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InviteCodeStatus = "valid" | "expired" | "exhausted" | "not_found";
+
+export type InviteCodeRecord = {
+  id: string | null;
+  code: string;
+  createdByUserId: string | null;
+  maxUses: number;
+  usedCount: number;
+  remainingUses: number;
+  expiresAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  status: InviteCodeStatus;
+  usable: boolean;
+};
+
 let database: DatabaseSync | null = null;
 
 export type WechatProfile = {
@@ -43,10 +73,7 @@ export type WechatProfile = {
 };
 
 function getSqlitePath() {
-  return (
-    process.env.SQLITE_DATABASE_PATH ||
-    path.join(process.cwd(), "storage", "data", "app.sqlite")
-  );
+  return getSqliteDatabasePath();
 }
 
 function getSecret(name: string, fallback: string) {
@@ -119,11 +146,36 @@ function getDatabase() {
         consumed_at TEXT,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS auth_invite_codes (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        created_by_user_id TEXT NOT NULL,
+        max_uses INTEGER NOT NULL,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS auth_invite_code_usages (
+        id TEXT PRIMARY KEY,
+        invite_code_id TEXT NOT NULL,
+        user_id TEXT NOT NULL UNIQUE,
+        used_at TEXT NOT NULL,
+        FOREIGN KEY(invite_code_id) REFERENCES auth_invite_codes(id)
+      );
     `);
     ensureAuthLoginCodeAttemptColumn(database);
     database.exec(`
       CREATE INDEX IF NOT EXISTS idx_auth_login_codes_identity
         ON auth_login_codes(identity_type, identity_hash, created_at);
+      CREATE INDEX IF NOT EXISTS idx_auth_login_codes_identity_active
+        ON auth_login_codes(identity_type, identity_hash, consumed_at, created_at);
+      CREATE INDEX IF NOT EXISTS idx_auth_invite_codes_expires_at
+        ON auth_invite_codes(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_auth_invite_code_usages_invite_code_id
+        ON auth_invite_code_usages(invite_code_id);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_users_identity_hash ON users(identity_hash);
     `);
   }
@@ -198,6 +250,151 @@ function rowToUser(row: UserRow): AuthUser {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function rowToInviteCode(row: InviteCodeRow): InviteCodeRecord {
+  const expired = new Date(row.expires_at).getTime() <= Date.now();
+  const exhausted = row.used_count >= row.max_uses;
+  const status: InviteCodeStatus = expired
+    ? "expired"
+    : exhausted
+      ? "exhausted"
+      : "valid";
+
+  return {
+    id: row.id,
+    code: row.code,
+    createdByUserId: row.created_by_user_id,
+    maxUses: row.max_uses,
+    usedCount: row.used_count,
+    remainingUses: Math.max(0, row.max_uses - row.used_count),
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    status,
+    usable: status === "valid",
+  };
+}
+
+function findUserByIdentityHash(identityHash: string) {
+  const row = getDatabase()
+    .prepare("SELECT * FROM users WHERE identity_hash = ?")
+    .get(identityHash) as UserRow | undefined;
+
+  return row ? rowToUser(row) : null;
+}
+
+function buildEmailUser(normalizedEmail: string) {
+  const now = new Date().toISOString();
+  return {
+    id: randomUUID(),
+    identityType: "email" as const,
+    identityEncrypted: encryptText(normalizedEmail),
+    identityHash: hashIdentity("email", normalizedEmail),
+    identityMasked: maskEmail(normalizedEmail),
+    username: generateUsernameFromEmail(normalizedEmail),
+    avatarUrl: "",
+    createdAt: now,
+    updatedAt: now,
+  } satisfies AuthUser;
+}
+
+function insertUser(database: DatabaseSync, user: AuthUser) {
+  database
+    .prepare(`
+      INSERT INTO users (
+        id, identity_type, identity_encrypted, identity_hash, identity_masked,
+        username, avatar_url, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      user.id,
+      user.identityType,
+      user.identityEncrypted,
+      user.identityHash,
+      user.identityMasked,
+      user.username,
+      user.avatarUrl,
+      user.createdAt,
+      user.updatedAt,
+    );
+}
+
+function getInviteCodeStatusInternal(database: DatabaseSync, code: string): InviteCodeRecord {
+  const normalizedCode = normalizeInviteCode(code);
+  if (!normalizedCode) {
+    return {
+      id: null,
+      code: "",
+      createdByUserId: null,
+      maxUses: 0,
+      usedCount: 0,
+      remainingUses: 0,
+      expiresAt: null,
+      createdAt: null,
+      updatedAt: null,
+      status: "not_found",
+      usable: false,
+    };
+  }
+
+  const row = database
+    .prepare("SELECT * FROM auth_invite_codes WHERE code = ?")
+    .get(normalizedCode) as InviteCodeRow | undefined;
+
+  if (!row) {
+    return {
+      id: null,
+      code: normalizedCode,
+      createdByUserId: null,
+      maxUses: 0,
+      usedCount: 0,
+      remainingUses: 0,
+      expiresAt: null,
+      createdAt: null,
+      updatedAt: null,
+      status: "not_found",
+      usable: false,
+    };
+  }
+
+  return rowToInviteCode(row);
+}
+
+function assertInviteCodeUsable(database: DatabaseSync, code: string) {
+  const status = getInviteCodeStatusInternal(database, code);
+  if (status.usable && status.id) {
+    return status;
+  }
+
+  if (status.status === "expired") {
+    throw new Error("邀请码已过期。");
+  }
+
+  if (status.status === "exhausted") {
+    throw new Error("邀请码可用次数已耗尽。");
+  }
+
+  throw new Error("邀请码无效。");
+}
+
+function consumeInviteCodeForUser(database: DatabaseSync, code: string, userId: string) {
+  const invite = assertInviteCodeUsable(database, code);
+  const now = new Date().toISOString();
+  database
+    .prepare(`
+      INSERT INTO auth_invite_code_usages (id, invite_code_id, user_id, used_at)
+      VALUES (?, ?, ?, ?)
+    `)
+    .run(randomUUID(), invite.id, userId, now);
+  database
+    .prepare(`
+      UPDATE auth_invite_codes
+      SET used_count = used_count + 1, updated_at = ?
+      WHERE id = ?
+    `)
+    .run(now, invite.id);
 }
 
 function createLoginCodeForIdentity(type: AuthIdentityType, value: string) {
@@ -308,6 +505,38 @@ export function findUserById(userId: string) {
   return row ? rowToUser(row) : null;
 }
 
+export function findUserByEmail(email: string) {
+  return findUserByIdentityHash(hashIdentity("email", normalizeEmail(email)));
+}
+
+export function createUserByEmailWithInvite(email: string, inviteCode: string) {
+  const normalized = normalizeEmail(email);
+  const existing = findUserByEmail(normalized);
+  if (existing) {
+    return { user: existing, created: false };
+  }
+
+  const database = getDatabase();
+  const user = buildEmailUser(normalized);
+  database.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    if (!isAdminEmail(normalized)) {
+      if (!normalizeInviteCode(inviteCode || "")) {
+        throw new Error("首次登录需要邀请码。");
+      }
+
+      consumeInviteCodeForUser(database, inviteCode, user.id);
+    }
+
+    insertUser(database, user);
+    database.exec("COMMIT");
+    return { user, created: true };
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function getOrCreateUserByPhone(phone: string) {
   const normalized = normalizePhone(phone);
   const identityHash = hashIdentity("phone", normalized);
@@ -347,39 +576,107 @@ export function getOrCreateUserByPhone(phone: string) {
 
 export function getOrCreateUserByEmail(email: string) {
   const normalized = normalizeEmail(email);
-  const identityHash = hashIdentity("email", normalized);
-  const existing = getDatabase()
-    .prepare("SELECT * FROM users WHERE identity_hash = ?")
-    .get(identityHash) as UserRow | undefined;
-
+  const existing = findUserByEmail(normalized);
   if (existing) {
-    return { user: rowToUser(existing), created: false };
+    return { user: existing, created: false };
   }
 
-  const now = new Date().toISOString();
-  const user: AuthUser = {
-    id: randomUUID(),
-    identityType: "email",
-    identityEncrypted: encryptText(normalized),
-    identityHash,
-    identityMasked: maskEmail(normalized),
-    username: generateUsernameFromEmail(normalized),
-    avatarUrl: "",
-    createdAt: now,
-    updatedAt: now,
-  };
+  const database = getDatabase();
+  const user = buildEmailUser(normalized);
+  database.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    if (!isAdminEmail(normalized)) {
+      throw new Error("首次登录需要邀请码。");
+    }
 
-  getDatabase()
+    insertUser(database, user);
+    database.exec("COMMIT");
+    return { user, created: true };
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function getOrCreateUserByEmailWithInvite(email: string, inviteCode?: string) {
+  return createUserByEmailWithInvite(email, inviteCode || "");
+}
+
+export function getInviteCodeStatus(code: string) {
+  return getInviteCodeStatusInternal(getDatabase(), code);
+}
+
+export function createInviteCodeRecord(input: {
+  createdByUserId: string;
+  maxUses: number;
+  expiresInMs: number;
+}) {
+  const database = getDatabase();
+  const maxUses = Math.max(1, Math.floor(input.maxUses));
+  const expiresInMs = Math.max(60 * 1000, Math.floor(input.expiresInMs));
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + expiresInMs).toISOString();
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const code = generateInviteCode();
+    const invite: InviteCodeRecord = {
+      id: randomUUID(),
+      code,
+      createdByUserId: input.createdByUserId,
+      maxUses,
+      usedCount: 0,
+      remainingUses: maxUses,
+      expiresAt,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      status: "valid",
+      usable: true,
+    };
+
+    try {
+      database
+        .prepare(`
+          INSERT INTO auth_invite_codes (
+            id, code, created_by_user_id, max_uses, used_count, expires_at, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          invite.id,
+          invite.code,
+          invite.createdByUserId,
+          invite.maxUses,
+          invite.usedCount,
+          invite.expiresAt,
+          invite.createdAt,
+          invite.updatedAt,
+        );
+      return invite;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("UNIQUE constraint failed: auth_invite_codes.code")
+      ) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error("邀请码生成失败，请稍后重试。");
+}
+
+export function listInviteCodeRecords(limit = 20) {
+  const rows = getDatabase()
     .prepare(`
-      INSERT INTO users (
-        id, identity_type, identity_encrypted, identity_hash, identity_masked,
-        username, avatar_url, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      SELECT * FROM auth_invite_codes
+      ORDER BY created_at DESC
+      LIMIT ?
     `)
-    .run(user.id, user.identityType, user.identityEncrypted, user.identityHash, user.identityMasked, user.username, user.avatarUrl, user.createdAt, user.updatedAt);
+    .all(Math.max(1, Math.floor(limit))) as InviteCodeRow[];
 
-  return { user, created: true };
+  return rows.map(rowToInviteCode);
 }
 
 function getWechatIdentityValue(profile: WechatProfile) {

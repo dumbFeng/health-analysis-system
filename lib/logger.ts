@@ -1,11 +1,12 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
+import { getLogsRoot } from "@/lib/app-data-paths";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export type LogContext = Record<string, unknown>;
 
-const logsRoot = path.join(process.cwd(), "storage", "logs");
+const logsRoot = getLogsRoot();
 const terminalLevelColor: Record<LogLevel, string> = {
   error: "\x1b[31m",
   warn: "\x1b[33m",

@@ -135,6 +135,7 @@ export type StoredReport = {
   createdAt: string;
   updatedAt: string;
   status: ReportStatus;
+  retryCount: number;
   patientName: string | null;
   examDate: string | null;
   institution: string | null;
@@ -153,3 +154,22 @@ export type PublicReport = Omit<
   | "userId"
   | "analysis"
 >;
+
+export type ReportListPage = {
+  reports: StoredReport[];
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+export type PublicReportListPage = {
+  reports: PublicReport[];
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+export type ReportListSummary = {
+  totalCount: number;
+  analyzingCount: number;
+  succeededCount: number;
+  failedCount: number;
+};

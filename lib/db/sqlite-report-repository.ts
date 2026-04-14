@@ -1,9 +1,16 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { getLocalStorageRoot, getSqliteDatabasePath } from "@/lib/app-data-paths";
 import type { ReportMetadataInput, ReportRepository } from "@/lib/db/report-repository";
 import { normalizeStoredReport } from "@/lib/report-analysis-normalizer";
-import type { ReportStatus, StorageMode, StoredReport } from "@/lib/report-types";
+import type {
+  ReportListPage,
+  ReportListSummary,
+  ReportStatus,
+  StorageMode,
+  StoredReport,
+} from "@/lib/report-types";
 
 type ReportRow = {
   id: string;
@@ -17,6 +24,7 @@ type ReportRow = {
   created_at: string;
   updated_at: string;
   status: ReportStatus;
+  retry_count: number | null;
   patient_name: string | null;
   exam_date: string | null;
   institution: string | null;
@@ -30,10 +38,7 @@ type ReportRow = {
 let database: DatabaseSync | null = null;
 
 function getSqlitePath() {
-  return (
-    process.env.SQLITE_DATABASE_PATH ||
-    path.join(process.cwd(), "storage", "data", "app.sqlite")
-  );
+  return getSqliteDatabasePath();
 }
 
 function getColumns(database: DatabaseSync, table: string) {
@@ -63,19 +68,30 @@ function readColumnExpression(database: DatabaseSync, column: string) {
 }
 
 function normalizeLocalPath(value: string, category: "uploads" | "reports") {
-  const root = path.join("storage", "local", category);
-  const normalized = path.isAbsolute(value) ? path.relative(process.cwd(), value) : value;
+  const root = `${category}/`;
+  const localRoot = getLocalStorageRoot().replaceAll("\\", "/");
+  const normalized = value.replaceAll("\\", "/");
 
   if (!normalized) {
     return "";
   }
 
-  if (normalized.startsWith(`${root}${path.sep}`)) {
+  if (normalized === category || normalized.startsWith(root)) {
     return normalized;
   }
 
+  const legacyPrefix = `storage/local/${category}/`;
+  if (normalized.startsWith(legacyPrefix)) {
+    return `${category}/${normalized.slice(legacyPrefix.length)}`;
+  }
+
+  const absolutePrefix = `${localRoot}/${category}/`;
+  if (normalized.startsWith(absolutePrefix)) {
+    return `${category}/${normalized.slice(absolutePrefix.length)}`;
+  }
+
   if (normalized.startsWith("pdf/") || normalized.startsWith("json/")) {
-    return path.join(root, normalized);
+    return `${category}/${normalized}`;
   }
 
   return normalized;
@@ -200,6 +216,7 @@ function getDatabase() {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         status TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
         patient_name TEXT,
         exam_date TEXT,
         institution TEXT,
@@ -218,6 +235,7 @@ function getDatabase() {
     ensureColumn(database, "reports", "analysis_model", "TEXT");
     ensureColumn(database, "reports", "overall_risk_level", "TEXT");
     ensureColumn(database, "reports", "risk_score", "INTEGER");
+    ensureColumn(database, "reports", "retry_count", "INTEGER NOT NULL DEFAULT 0");
   }
 
   return database;
@@ -260,6 +278,10 @@ function rowToReport(row: ReportRow): StoredReport {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     status: row.status,
+    retryCount:
+      typeof row.retry_count === "number" && Number.isFinite(row.retry_count)
+        ? Math.max(0, Math.floor(row.retry_count))
+        : 0,
     patientName: row.patient_name,
     examDate: row.exam_date,
     institution: row.institution,
@@ -270,6 +292,35 @@ function rowToReport(row: ReportRow): StoredReport {
     errorMessage: row.error_message,
     analysis: null,
   }));
+}
+
+function encodeListCursor(row: Pick<ReportRow, "updated_at" | "id">) {
+  return Buffer.from(JSON.stringify({ updatedAt: row.updated_at, id: row.id }), "utf8").toString(
+    "base64url",
+  );
+}
+
+function decodeListCursor(cursor: string | null | undefined) {
+  if (!cursor) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      updatedAt?: string;
+      id?: string;
+    };
+    if (typeof parsed.updatedAt !== "string" || typeof parsed.id !== "string") {
+      return null;
+    }
+
+    return {
+      updatedAt: parsed.updatedAt,
+      id: parsed.id,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export class SqliteReportRepository implements ReportRepository {
@@ -286,6 +337,7 @@ export class SqliteReportRepository implements ReportRepository {
       createdAt: input.createdAt,
       updatedAt: input.updatedAt,
       status: input.status,
+      retryCount: 0,
       patientName: null,
       examDate: null,
       institution: null,
@@ -310,11 +362,11 @@ export class SqliteReportRepository implements ReportRepository {
       .prepare(`
         INSERT INTO reports (
           id, owner_user_id, file_name, storage_mode, source_file_path, analysis_file_path,
-          mime_type, file_size, created_at, updated_at, status,
+          mime_type, file_size, created_at, updated_at, status, retry_count,
           patient_name, exam_date, institution, summary,
           analysis_model, overall_risk_level, risk_score, error_message
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           owner_user_id = excluded.owner_user_id,
           file_name = excluded.file_name,
@@ -326,6 +378,7 @@ export class SqliteReportRepository implements ReportRepository {
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           status = excluded.status,
+          retry_count = excluded.retry_count,
           patient_name = excluded.patient_name,
           exam_date = excluded.exam_date,
           institution = excluded.institution,
@@ -347,6 +400,7 @@ export class SqliteReportRepository implements ReportRepository {
         normalized.createdAt,
         normalized.updatedAt,
         normalized.status,
+        normalized.retryCount,
         normalized.patientName,
         normalized.examDate,
         normalized.institution,
@@ -390,6 +444,90 @@ export class SqliteReportRepository implements ReportRepository {
     return rows.map(rowToReport);
   }
 
+  async listPage(input: { userId?: string; cursor?: string | null; limit: number }): Promise<ReportListPage> {
+    const database = getDatabase();
+    ensureReportOwnershipColumn(database);
+    const limit = Math.max(1, Math.floor(input.limit));
+    const cursor = decodeListCursor(input.cursor);
+
+    const whereParts: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (input.userId) {
+      whereParts.push("owner_user_id = ?");
+      params.push(input.userId);
+    }
+
+    if (cursor) {
+      whereParts.push("(updated_at < ? OR (updated_at = ? AND id < ?))");
+      params.push(cursor.updatedAt, cursor.updatedAt, cursor.id);
+    }
+
+    const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const rows = database
+      .prepare(`
+        SELECT * FROM reports
+        ${whereClause}
+        ORDER BY updated_at DESC, id DESC
+        LIMIT ?
+      `)
+      .all(...params, limit + 1) as ReportRow[];
+
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? encodeListCursor(pageRows[pageRows.length - 1]!) : null;
+
+    return {
+      reports: pageRows.map(rowToReport),
+      nextCursor,
+      hasMore,
+    };
+  }
+
+  async getSummary(userId?: string): Promise<ReportListSummary> {
+    const database = getDatabase();
+    ensureReportOwnershipColumn(database);
+    const row = userId
+      ? (database
+          .prepare(`
+            SELECT
+              COUNT(*) AS total_count,
+              SUM(CASE WHEN status = 'analyzing' THEN 1 ELSE 0 END) AS analyzing_count,
+              SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_count,
+              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count
+            FROM reports
+            WHERE owner_user_id = ?
+          `)
+          .get(userId) as {
+            total_count: number | null;
+            analyzing_count: number | null;
+            succeeded_count: number | null;
+            failed_count: number | null;
+          })
+      : (database
+          .prepare(`
+            SELECT
+              COUNT(*) AS total_count,
+              SUM(CASE WHEN status = 'analyzing' THEN 1 ELSE 0 END) AS analyzing_count,
+              SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_count,
+              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count
+            FROM reports
+          `)
+          .get() as {
+            total_count: number | null;
+            analyzing_count: number | null;
+            succeeded_count: number | null;
+            failed_count: number | null;
+          });
+
+    return {
+      totalCount: Number(row.total_count || 0),
+      analyzingCount: Number(row.analyzing_count || 0),
+      succeededCount: Number(row.succeeded_count || 0),
+      failedCount: Number(row.failed_count || 0),
+    };
+  }
+
   async delete(reportId: string, userId?: string) {
     const database = getDatabase();
     ensureReportOwnershipColumn(database);
@@ -399,14 +537,5 @@ export class SqliteReportRepository implements ReportRepository {
     }
 
     database.prepare("DELETE FROM reports WHERE id = ?").run(reportId);
-  }
-
-  async claimUnownedReports(userId: string) {
-    const database = getDatabase();
-    ensureReportOwnershipColumn(database);
-    const result = database
-      .prepare("UPDATE reports SET owner_user_id = ? WHERE owner_user_id IS NULL OR owner_user_id = ''")
-      .run(userId);
-    return Number(result.changes || 0);
   }
 }

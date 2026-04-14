@@ -1,3 +1,5 @@
+import { getAuthSmsProviderName } from "@/lib/auth/auth-config";
+
 export type SendLoginCodeSmsInput = {
   phone: string;
   code: string;
@@ -15,7 +17,7 @@ class DevSmsProvider implements SmsProvider {
 }
 
 export function getSmsProviderName() {
-  return (process.env.SMS_PROVIDER || "dev").trim().toLowerCase();
+  return getAuthSmsProviderName().trim().toLowerCase();
 }
 
 export async function getSmsProvider(): Promise<SmsProvider> {

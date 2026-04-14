@@ -1,4 +1,15 @@
 import { createHash, createHmac } from "node:crypto";
+import {
+  getAuthEmailFrom,
+  getAuthEmailTencentEndpoint,
+  getAuthEmailTencentRegion,
+  getAuthEmailTencentReplyTo,
+  getAuthEmailTencentSubject,
+  getAuthEmailTencentTemplateId,
+  getAuthEmailTencentTemplateParams,
+  getAuthTencentSecretId,
+  getAuthTencentSecretKey,
+} from "@/lib/auth/auth-config";
 import type { EmailProvider, SendLoginCodeEmailInput } from "@/lib/email/email-provider";
 
 type TencentEmailResponse = {
@@ -18,7 +29,17 @@ const version = "2020-10-02";
 const algorithm = "TC3-HMAC-SHA256";
 
 function requireEnv(name: string) {
-  const value = process.env[name]?.trim();
+  let value = "";
+  if (name === "AUTH_TENCENT_SECRET_ID") {
+    value = getAuthTencentSecretId();
+  } else if (name === "AUTH_TENCENT_SECRET_KEY") {
+    value = getAuthTencentSecretKey();
+  } else if (name === "AUTH_EMAIL_FROM") {
+    value = getAuthEmailFrom();
+  } else if (name === "AUTH_EMAIL_TENCENT_TEMPLATE_ID") {
+    value = getAuthEmailTencentTemplateId();
+  }
+
   if (!value) {
     throw new Error(`邮件配置缺失: ${name}`);
   }
@@ -81,7 +102,7 @@ function buildTemplateData(input: SendLoginCodeEmailInput) {
     code: input.code,
     ttlMinutes: String(input.ttlMinutes),
   };
-  const keys = (process.env.TENCENT_EMAIL_TEMPLATE_PARAMS || "code,ttlMinutes")
+  const keys = getAuthEmailTencentTemplateParams()
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
@@ -91,18 +112,18 @@ function buildTemplateData(input: SendLoginCodeEmailInput) {
 
 export class TencentCloudEmailProvider implements EmailProvider {
   async sendLoginCode(input: SendLoginCodeEmailInput) {
-    const secretId = requireEnv("TENCENTCLOUD_SECRET_ID");
-    const secretKey = requireEnv("TENCENTCLOUD_SECRET_KEY");
-    const from = requireEnv("EMAIL_FROM");
-    const templateId = Number(requireEnv("TENCENT_EMAIL_TEMPLATE_ID"));
+    const secretId = requireEnv("AUTH_TENCENT_SECRET_ID");
+    const secretKey = requireEnv("AUTH_TENCENT_SECRET_KEY");
+    const from = requireEnv("AUTH_EMAIL_FROM");
+    const templateId = Number(requireEnv("AUTH_EMAIL_TENCENT_TEMPLATE_ID"));
     if (!Number.isFinite(templateId) || templateId <= 0) {
-      throw new Error("邮件配置错误: TENCENT_EMAIL_TEMPLATE_ID 必须是有效数字");
+      throw new Error("邮件配置错误: AUTH_EMAIL_TENCENT_TEMPLATE_ID 必须是有效数字");
     }
 
-    const subject = process.env.TENCENT_EMAIL_SUBJECT || "【知几 CareYou】登录验证码";
-    const replyTo = process.env.TENCENT_EMAIL_REPLY_TO || "";
-    const region = process.env.TENCENT_EMAIL_REGION || "ap-guangzhou";
-    const host = process.env.TENCENT_EMAIL_ENDPOINT || "ses.tencentcloudapi.com";
+    const subject = getAuthEmailTencentSubject();
+    const replyTo = getAuthEmailTencentReplyTo();
+    const region = getAuthEmailTencentRegion();
+    const host = getAuthEmailTencentEndpoint();
     const timestamp = Math.floor(Date.now() / 1000);
     const payload = JSON.stringify({
       FromEmailAddress: from,
@@ -140,7 +161,12 @@ export class TencentCloudEmailProvider implements EmailProvider {
 
     if (!response.ok || data.Response?.Error) {
       const error = data.Response?.Error;
-      throw new Error(error?.Message || error?.Code || "腾讯云邮件发送失败");
+      const code = error?.Code ? ` code=${error.Code};` : "";
+      const requestId = data.Response?.RequestId
+        ? ` requestId=${data.Response.RequestId};`
+        : "";
+      const message = error?.Message || error?.Code || response.statusText || "腾讯云邮件发送失败";
+      throw new Error(`${message}${code}${requestId}`.trim());
     }
   }
 }

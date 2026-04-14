@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { isAdminUser } from "@/lib/auth/admin";
 import { authCookieName, createAuthToken, verifyAuthToken } from "@/lib/auth/jwt";
 import { findUserById } from "@/lib/auth/sqlite-auth-repository";
 import type { AuthSession, AuthUser } from "@/lib/auth/types";
@@ -11,6 +12,10 @@ export type AuthContext = {
 
 export function createUnauthorizedResponse() {
   return NextResponse.json({ error: "请先登录。" }, { status: 401 });
+}
+
+export function createForbiddenResponse() {
+  return NextResponse.json({ error: "无权访问该资源。" }, { status: 403 });
 }
 
 export async function getSessionFromRequest(request: Request) {
@@ -48,6 +53,15 @@ export async function requireAuth(request: Request): Promise<AuthContext> {
   }
 
   return { session, user };
+}
+
+export async function requireAdmin(request: Request): Promise<AuthContext> {
+  const auth = await requireAuth(request);
+  if (!isAdminUser(auth.user)) {
+    throw new Error("FORBIDDEN");
+  }
+
+  return auth;
 }
 
 export async function setAuthCookie(response: NextResponse, session: AuthSession) {

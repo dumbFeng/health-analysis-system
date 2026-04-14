@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { getReportRepository } from "@/lib/db/report-repository-factory";
 import { normalizeStoredReport } from "@/lib/report-analysis-normalizer";
-import type { HealthReportAnalysis, PublicReport, StoredReport } from "@/lib/report-types";
+import type {
+  HealthReportAnalysis,
+  PublicReport,
+  PublicReportListPage,
+  ReportListSummary,
+  StoredReport,
+} from "@/lib/report-types";
 import {
   buildStorageKey,
   deleteStoredFile,
@@ -179,6 +185,42 @@ export async function listReports(userId?: string) {
   return repository.list(userId);
 }
 
+export async function listReportsPage(input: {
+  userId?: string;
+  cursor?: string | null;
+  limit: number;
+}): Promise<PublicReportListPage & { summary: ReportListSummary }> {
+  const repository = await getRepository();
+  const page = await repository.listPage(input);
+
+  await Promise.all(
+    page.reports.map(async (report) => {
+      if (report.status !== "succeeded") {
+        return;
+      }
+
+      const hydrated = await hydrateReportAnalysis(report);
+      if (
+        hydrated.analysis &&
+        (report.analysisModel !== hydrated.analysis.model ||
+          report.overallRiskLevel !== hydrated.analysis.executiveSummary.overallRiskLevel ||
+          report.riskScore !== hydrated.analysis.executiveSummary.riskScore)
+      ) {
+        await saveReport(hydrated);
+      }
+    }),
+  );
+
+  const refreshedPage = await repository.listPage(input);
+  const summary = await repository.getSummary(input.userId);
+  return {
+    reports: refreshedPage.reports.map(toPublicReport),
+    nextCursor: refreshedPage.nextCursor,
+    hasMore: refreshedPage.hasMore,
+    summary,
+  };
+}
+
 export async function updateReport(
   reportId: string,
   updater: (report: StoredReport) => StoredReport,
@@ -200,10 +242,6 @@ export async function deleteReport(reportId: string, userId?: string) {
     deleteStoredFile(getStorageKeyFromPath(report.analysisFilePath, "report"), "report"),
     getReportRepository().delete(reportId, userId),
   ]);
-}
-
-export async function claimUnownedReports(userId: string) {
-  return getReportRepository().claimUnownedReports(userId);
 }
 
 export function toPublicReport(report: StoredReport): PublicReport {

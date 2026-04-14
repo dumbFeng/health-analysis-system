@@ -8,7 +8,6 @@ import {
   wechatOAuthStateCookieName,
 } from "@/lib/auth/wechat-oauth";
 import { logger } from "@/lib/logger";
-import { claimUnownedReports } from "@/lib/report-store";
 
 export const runtime = "nodejs";
 
@@ -40,7 +39,6 @@ export async function GET(request: Request) {
   try {
     const profile = await exchangeWechatCodeForProfile(code);
     const { user } = getOrCreateUserByWechat(profile);
-    await claimUnownedReports(user.id);
 
     const response = NextResponse.redirect(new URL(nextPath, request.url));
     await setAuthCookie(response, {

@@ -16,14 +16,20 @@ function sanitizeNextPath(value: string | undefined) {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string }>;
+  searchParams: Promise<{ next?: string; error?: string; inviteCode?: string }>;
 }) {
   const auth = await getCurrentAuthFromCookies();
-  const { next, error } = await searchParams;
+  const { next, error, inviteCode } = await searchParams;
   const nextPath = sanitizeNextPath(next);
   if (auth) {
     redirect(nextPath);
   }
 
-  return <LoginForm nextPath={nextPath} initialMessage={error} />;
+  return (
+    <LoginForm
+      nextPath={nextPath}
+      initialMessage={error}
+      initialInviteCode={typeof inviteCode === "string" ? inviteCode : ""}
+    />
+  );
 }

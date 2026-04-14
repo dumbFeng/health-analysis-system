@@ -51,12 +51,12 @@ export function AppTopNav({ currentUser }: AppTopNavProps) {
   return (
     <header className="sticky top-0 z-50 border-b border-stone-200/70 bg-[#fffaf3]/92 backdrop-blur-sm">
       <div className="w-full px-4 sm:px-5 lg:px-6">
-        <div className="flex min-h-16 items-center gap-4">
+        <div className="grid min-h-16 grid-cols-[auto_1fr_auto] items-center gap-3 sm:gap-4">
           <Link href="/" className="min-w-0 shrink-0">
             <BrandMark compact iconClassName="h-9 w-9 rounded-[0.9rem]" />
           </Link>
 
-          <div className="ml-auto flex items-center gap-4">
+          <div className="flex justify-center px-2">
             <nav aria-label="主导航" className="flex items-center gap-1">
               {appNavTabs.map((tab) => {
                 const active = isTabActive(tab, pathname);
@@ -76,52 +76,54 @@ export function AppTopNav({ currentUser }: AppTopNavProps) {
                 );
               })}
             </nav>
-            <span className="h-6 w-px bg-stone-200/90" aria-hidden="true" />
           </div>
 
-          <div className="relative shrink-0" ref={userMenuRef}>
-            <button
-              type="button"
-              aria-label="用户菜单"
-              aria-expanded={isUserMenuOpen}
-              onClick={() => {
-                setIsUserMenuOpen((current) => !current);
-              }}
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-stone-200/80 bg-white/70 text-sm font-semibold text-[var(--accent)] transition hover:border-emerald-700/20 hover:bg-white"
-            >
-              {currentUser.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser.username}
-                  className="h-full w-full rounded-full object-cover"
-                />
-              ) : (
-                currentUser.username.trim().slice(0, 1).toUpperCase() || "U"
-              )}
-            </button>
+          <div className="flex justify-end">
+            <span className="mr-3 hidden h-6 w-px bg-stone-200/90 sm:block" aria-hidden="true" />
+            <div className="relative shrink-0" ref={userMenuRef}>
+              <button
+                type="button"
+                aria-label="用户菜单"
+                aria-expanded={isUserMenuOpen}
+                onClick={() => {
+                  setIsUserMenuOpen((current) => !current);
+                }}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-stone-200/80 bg-white/70 text-sm font-semibold text-[var(--accent)] transition hover:border-emerald-700/20 hover:bg-white"
+              >
+                {currentUser.avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt={currentUser.username}
+                    className="h-full w-full rounded-full object-cover"
+                  />
+                ) : (
+                  currentUser.username.trim().slice(0, 1).toUpperCase() || "U"
+                )}
+              </button>
 
-            {isUserMenuOpen ? (
-              <div className="absolute top-11 right-0 z-[80] w-56 rounded-[1rem] border border-stone-200/80 bg-[#fffaf3] p-2 shadow-[0_18px_44px_rgba(41,37,36,0.10)]">
-                <div className="rounded-[0.8rem] bg-stone-50/80 px-3 py-3">
-                  <p className="text-xs tracking-[0.16em] text-stone-500 uppercase">
-                    当前账号
-                  </p>
-                  <p className="mt-1 truncate text-sm font-semibold text-stone-900">
-                    {currentUser.username}
-                  </p>
+              {isUserMenuOpen ? (
+                <div className="absolute top-11 right-0 z-[80] w-56 rounded-[1rem] border border-stone-200/80 bg-[#fffaf3] p-2 shadow-[0_18px_44px_rgba(41,37,36,0.10)]">
+                  <div className="rounded-[0.8rem] bg-stone-50/80 px-3 py-3">
+                    <p className="text-xs tracking-[0.16em] text-stone-500 uppercase">
+                      当前账号
+                    </p>
+                    <p className="mt-1 break-all text-sm font-semibold leading-6 text-stone-900">
+                      {currentUser.username}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleLogout();
+                    }}
+                    className="mt-2 w-full rounded-[1rem] px-3 py-2 text-left text-sm font-medium text-stone-700 transition hover:bg-stone-100 hover:text-stone-950"
+                  >
+                    退出登录
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleLogout();
-                  }}
-                  className="mt-2 w-full rounded-[1rem] px-3 py-2 text-left text-sm font-medium text-stone-700 transition hover:bg-stone-100 hover:text-stone-950"
-                >
-                  退出登录
-                </button>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

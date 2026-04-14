@@ -1,4 +1,10 @@
 import { randomBytes } from "node:crypto";
+import {
+  getAuthWechatAppId,
+  getAuthWechatAppSecret,
+  getAuthWechatRedirectUri,
+  getAuthWechatScope,
+} from "@/lib/auth/auth-config";
 
 export const wechatOAuthStateCookieName = "health_wechat_oauth_state";
 export const wechatOAuthNextCookieName = "health_wechat_oauth_next";
@@ -29,7 +35,10 @@ type WechatUserInfoResponse = {
 };
 
 function requireEnv(name: string) {
-  const value = process.env[name]?.trim();
+  const value =
+    name === "AUTH_WECHAT_APP_ID"
+      ? getAuthWechatAppId()
+      : getAuthWechatAppSecret();
   if (!value) {
     throw new Error(`微信登录配置缺失: ${name}`);
   }
@@ -38,7 +47,7 @@ function requireEnv(name: string) {
 }
 
 export function isWechatOAuthConfigured() {
-  return Boolean(process.env.WECHAT_OAUTH_APP_ID && process.env.WECHAT_OAUTH_APP_SECRET);
+  return Boolean(getAuthWechatAppId() && getAuthWechatAppSecret());
 }
 
 export function createWechatOAuthState() {
@@ -57,22 +66,22 @@ export function buildWechatAuthorizeUrl(input: {
   requestUrl: string;
   state: string;
 }) {
-  const appId = requireEnv("WECHAT_OAUTH_APP_ID");
+  const appId = requireEnv("AUTH_WECHAT_APP_ID");
   const redirectUri =
-    process.env.WECHAT_OAUTH_REDIRECT_URI ||
+    getAuthWechatRedirectUri() ||
     new URL("/api/auth/wechat/callback", input.requestUrl).toString();
   const url = new URL("https://open.weixin.qq.com/connect/qrconnect");
   url.searchParams.set("appid", appId);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", process.env.WECHAT_OAUTH_SCOPE || "snsapi_login");
+  url.searchParams.set("scope", getAuthWechatScope());
   url.searchParams.set("state", input.state);
   return `${url.toString()}#wechat_redirect`;
 }
 
 export async function exchangeWechatCodeForProfile(code: string) {
-  const appId = requireEnv("WECHAT_OAUTH_APP_ID");
-  const appSecret = requireEnv("WECHAT_OAUTH_APP_SECRET");
+  const appId = requireEnv("AUTH_WECHAT_APP_ID");
+  const appSecret = requireEnv("AUTH_WECHAT_APP_SECRET");
   const tokenUrl = new URL("https://api.weixin.qq.com/sns/oauth2/access_token");
   tokenUrl.searchParams.set("appid", appId);
   tokenUrl.searchParams.set("secret", appSecret);

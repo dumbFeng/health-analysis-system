@@ -1,4 +1,9 @@
 import { TencentCloudEmailProvider } from "@/lib/email/tencent-cloud-email-provider";
+import {
+  getAuthEmailFrom,
+  getAuthEmailProviderName,
+  getAuthEmailResendApiKey,
+} from "@/lib/auth/auth-config";
 
 export type SendLoginCodeEmailInput = {
   email: string;
@@ -18,10 +23,10 @@ class DevEmailProvider implements EmailProvider {
 
 class ResendEmailProvider implements EmailProvider {
   async sendLoginCode(input: SendLoginCodeEmailInput) {
-    const apiKey = process.env.RESEND_API_KEY;
-    const from = process.env.EMAIL_FROM;
+    const apiKey = getAuthEmailResendApiKey();
+    const from = getAuthEmailFrom();
     if (!apiKey || !from) {
-      throw new Error("邮件配置缺失: RESEND_API_KEY 或 EMAIL_FROM");
+      throw new Error("邮件配置缺失: AUTH_EMAIL_RESEND_API_KEY 或 AUTH_EMAIL_FROM");
     }
 
     const response = await fetch("https://api.resend.com/emails", {
@@ -46,7 +51,7 @@ class ResendEmailProvider implements EmailProvider {
 }
 
 export function getEmailProviderName() {
-  return (process.env.EMAIL_PROVIDER || "dev").trim().toLowerCase();
+  return getAuthEmailProviderName().trim().toLowerCase();
 }
 
 export function getEmailProvider(): EmailProvider {

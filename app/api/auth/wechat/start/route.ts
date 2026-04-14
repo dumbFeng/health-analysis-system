@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set(
       "error",
-      "微信登录尚未配置，请先设置 WECHAT_OAUTH_APP_ID 和 WECHAT_OAUTH_APP_SECRET。",
+      "微信登录尚未配置，请先设置 AUTH_WECHAT_APP_ID 和 AUTH_WECHAT_APP_SECRET。",
     );
     return NextResponse.redirect(loginUrl);
   }

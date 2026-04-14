@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AiHealthCheckResult } from "@/lib/ai/ai-provider";
-import type { PublicReport } from "@/lib/report-types";
+import type { PublicReport, ReportListSummary } from "@/lib/report-types";
 
 type DashboardProps = {
   initialReports: PublicReport[];
+  initialNextCursor: string | null;
+  initialHasMore: boolean;
+  initialSummary: ReportListSummary;
   initialAiHealth: AiHealthCheckResult;
 };
 
@@ -73,12 +76,19 @@ function getRiskClass(level: PublicReport["overallRiskLevel"]) {
 
 export function ReportDashboard({
   initialReports,
+  initialNextCursor,
+  initialHasMore,
+  initialSummary,
   initialAiHealth,
 }: DashboardProps) {
   const [reports, setReports] = useState(initialReports);
+  const [nextCursor, setNextCursor] = useState(initialNextCursor);
+  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [summary, setSummary] = useState(initialSummary);
   const [aiHealth, setAiHealth] = useState(initialAiHealth);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [reportPendingDelete, setReportPendingDelete] = useState<PublicReport | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -87,20 +97,71 @@ export function ReportDashboard({
   const [selectedStatus, setSelectedStatus] = useState("all");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  async function refreshReports() {
-    const response = await fetch("/api/reports", { cache: "no-store" });
+  async function refreshReports(limit = reports.length) {
+    const response = await fetch(`/api/reports?limit=${limit}`, { cache: "no-store" });
     if (!response.ok) {
       return;
     }
 
-    const data = (await response.json()) as { reports: PublicReport[] };
+    const data = (await response.json()) as {
+      reports: PublicReport[];
+      nextCursor: string | null;
+      hasMore: boolean;
+      summary: ReportListSummary;
+    };
     setReports(data.reports);
+    setNextCursor(data.nextCursor);
+    setHasMore(data.hasMore);
+    setSummary(data.summary);
+  }
+
+  async function loadMoreReports() {
+    if (!hasMore || !nextCursor || isLoadingMore) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    try {
+      const response = await fetch(
+        `/api/reports?cursor=${encodeURIComponent(nextCursor)}`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) {
+        return;
+      }
+
+      const data = (await response.json()) as {
+        reports: PublicReport[];
+        nextCursor: string | null;
+        hasMore: boolean;
+        summary: ReportListSummary;
+      };
+      setReports((current) => [...current, ...data.reports]);
+      setNextCursor(data.nextCursor);
+      setHasMore(data.hasMore);
+      setSummary(data.summary);
+    } finally {
+      setIsLoadingMore(false);
+    }
   }
 
   useEffect(() => {
     setReports(initialReports);
   }, [initialReports]);
+
+  useEffect(() => {
+    setNextCursor(initialNextCursor);
+  }, [initialNextCursor]);
+
+  useEffect(() => {
+    setHasMore(initialHasMore);
+  }, [initialHasMore]);
+
+  useEffect(() => {
+    setSummary(initialSummary);
+  }, [initialSummary]);
 
   useEffect(() => {
     setAiHealth(initialAiHealth);
@@ -159,6 +220,26 @@ export function ReportDashboard({
     return () => window.clearInterval(timer);
   }, [hasActiveAnalysis]);
 
+  useEffect(() => {
+    if (!hasMore || isLoadingMore || !loadMoreRef.current) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void loadMoreReports();
+        }
+      },
+      {
+        rootMargin: "160px 0px",
+      },
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, nextCursor]);
+
   async function handleUpload(file: File) {
     setUploadError(null);
 
@@ -188,6 +269,12 @@ export function ReportDashboard({
       }
 
       setReports((current) => [data.report as PublicReport, ...current]);
+      setHasMore(true);
+      setSummary((current) => ({
+        ...current,
+        totalCount: current.totalCount + 1,
+        analyzingCount: current.analyzingCount + 1,
+      }));
 
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -222,6 +309,22 @@ export function ReportDashboard({
       }
 
       setReports((current) => current.filter((report) => report.id !== reportId));
+      setSummary((current) => ({
+        ...current,
+        totalCount: Math.max(0, current.totalCount - 1),
+        analyzingCount:
+          reportPendingDelete?.status === "analyzing"
+            ? Math.max(0, current.analyzingCount - 1)
+            : current.analyzingCount,
+        succeededCount:
+          reportPendingDelete?.status === "succeeded"
+            ? Math.max(0, current.succeededCount - 1)
+            : current.succeededCount,
+        failedCount:
+          reportPendingDelete?.status === "failed"
+            ? Math.max(0, current.failedCount - 1)
+            : current.failedCount,
+      }));
     } finally {
       setPendingDeleteId(null);
     }
@@ -300,18 +403,18 @@ export function ReportDashboard({
                   <p className="text-xs tracking-[0.16em] text-sky-700 uppercase">
                     已上传
                   </p>
-                  <p className="mt-2 text-3xl font-semibold">{reports.length}</p>
+                  <p className="mt-2 text-3xl font-semibold">{summary.totalCount}</p>
                 </div>
                 <div className="rounded-[1.2rem] bg-amber-50 px-4 py-4 text-amber-900">
                   <p className="text-xs tracking-[0.16em] uppercase">分析中</p>
                   <p className="mt-2 text-3xl font-semibold">
-                    {reports.filter((report) => report.status === "analyzing").length}
+                    {summary.analyzingCount}
                   </p>
                 </div>
                 <div className="rounded-[1.2rem] bg-emerald-50 px-4 py-4 text-emerald-900">
                   <p className="text-xs tracking-[0.16em] uppercase">已完成</p>
                   <p className="mt-2 text-3xl font-semibold">
-                    {reports.filter((report) => report.status === "succeeded").length}
+                    {summary.succeededCount}
                   </p>
                 </div>
               </div>
@@ -558,6 +661,7 @@ export function ReportDashboard({
                       {report.status === "succeeded" ? (
                         <Link
                           href={`/reports?id=${report.id}`}
+                          scroll
                           className="button-primary rounded-full px-3 py-2 text-center text-xs font-medium transition sm:px-4 sm:text-sm"
                         >
                           查看分析结果
@@ -581,6 +685,21 @@ export function ReportDashboard({
               })}
             </div>
           )}
+
+          {filteredReports.length > 0 && hasMore ? (
+            <div ref={loadMoreRef} className="mt-5 flex justify-center">
+              <button
+                type="button"
+                disabled={isLoadingMore}
+                onClick={() => {
+                  void loadMoreReports();
+                }}
+                className="rounded-full border border-stone-200/80 bg-white/80 px-5 py-2.5 text-sm font-medium text-stone-700 transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isLoadingMore ? "加载中..." : "加载更多报告"}
+              </button>
+            </div>
+          ) : null}
         </section>
         </section>
       </div>

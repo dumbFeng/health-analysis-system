@@ -1,4 +1,14 @@
 import { createHash, createHmac } from "node:crypto";
+import {
+  getAuthSmsEndpoint,
+  getAuthSmsRegion,
+  getAuthSmsSdkAppId,
+  getAuthSmsSignName,
+  getAuthSmsTemplateId,
+  getAuthSmsTemplateParams,
+  getAuthTencentSecretId,
+  getAuthTencentSecretKey,
+} from "@/lib/auth/auth-config";
 import type { SendLoginCodeSmsInput, SmsProvider } from "@/lib/sms/sms-provider";
 
 type TencentSmsResponse = {
@@ -22,7 +32,18 @@ const version = "2021-01-11";
 const algorithm = "TC3-HMAC-SHA256";
 
 function requireEnv(name: string) {
-  const value = process.env[name]?.trim();
+  let value = "";
+  if (name === "AUTH_TENCENT_SECRET_ID") {
+    value = getAuthTencentSecretId();
+  } else if (name === "AUTH_TENCENT_SECRET_KEY") {
+    value = getAuthTencentSecretKey();
+  } else if (name === "AUTH_SMS_TENCENT_SDK_APP_ID") {
+    value = getAuthSmsSdkAppId();
+  } else if (name === "AUTH_SMS_TENCENT_SIGN_NAME") {
+    value = getAuthSmsSignName();
+  } else if (name === "AUTH_SMS_TENCENT_TEMPLATE_ID") {
+    value = getAuthSmsTemplateId();
+  }
   if (!value) {
     throw new Error(`短信配置缺失: ${name}`);
   }
@@ -60,7 +81,7 @@ function normalizeTencentPhone(phone: string) {
 }
 
 function buildTemplateParamSet(input: SendLoginCodeSmsInput) {
-  const order = (process.env.TENCENT_SMS_TEMPLATE_PARAMS || "code")
+  const order = getAuthSmsTemplateParams()
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
@@ -114,13 +135,13 @@ function createAuthorization(input: {
 
 export class TencentCloudSmsProvider implements SmsProvider {
   async sendLoginCode(input: SendLoginCodeSmsInput) {
-    const secretId = requireEnv("TENCENTCLOUD_SECRET_ID");
-    const secretKey = requireEnv("TENCENTCLOUD_SECRET_KEY");
-    const smsSdkAppId = requireEnv("TENCENT_SMS_SDK_APP_ID");
-    const signName = requireEnv("TENCENT_SMS_SIGN_NAME");
-    const templateId = requireEnv("TENCENT_SMS_TEMPLATE_ID");
-    const region = process.env.TENCENT_SMS_REGION || "ap-guangzhou";
-    const host = process.env.TENCENT_SMS_ENDPOINT || "sms.tencentcloudapi.com";
+    const secretId = requireEnv("AUTH_TENCENT_SECRET_ID");
+    const secretKey = requireEnv("AUTH_TENCENT_SECRET_KEY");
+    const smsSdkAppId = requireEnv("AUTH_SMS_TENCENT_SDK_APP_ID");
+    const signName = requireEnv("AUTH_SMS_TENCENT_SIGN_NAME");
+    const templateId = requireEnv("AUTH_SMS_TENCENT_TEMPLATE_ID");
+    const region = getAuthSmsRegion();
+    const host = getAuthSmsEndpoint();
     const timestamp = Math.floor(Date.now() / 1000);
     const payload = JSON.stringify({
       PhoneNumberSet: [normalizeTencentPhone(input.phone)],

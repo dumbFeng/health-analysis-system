@@ -19,5 +19,5 @@ export function maskEmail(email: string) {
 
 export function generateUsernameFromEmail(email: string) {
   const [name] = normalizeEmail(email).split("@");
-  return name ? `健康伙伴${name.slice(0, 8)}` : "健康伙伴";
+  return name ? `健康伙伴${name.slice(0, 16)}` : "健康伙伴";
 }

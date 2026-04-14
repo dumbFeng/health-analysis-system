@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { AppTopNav } from "@/components/app-top-nav";
 import { BackToTopButton } from "@/components/back-to-top-button";
+import { RootChrome } from "@/components/root-chrome";
 import { getCurrentAuthFromCookies } from "@/lib/auth/server";
 import "./globals.css";
 
@@ -24,14 +24,16 @@ export default async function RootLayout({
   return (
     <html lang="zh-CN">
       <body>
-        {auth ? (
-          <AppTopNav
-            currentUser={{
-              username: auth.user.username,
-              avatarUrl: auth.user.avatarUrl,
-            }}
-          />
-        ) : null}
+        <RootChrome
+          currentUser={
+            auth
+              ? {
+                  username: auth.user.username,
+                  avatarUrl: auth.user.avatarUrl,
+                }
+              : null
+          }
+        />
         {children}
         <BackToTopButton />
       </body>

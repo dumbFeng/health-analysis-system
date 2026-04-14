@@ -2,7 +2,8 @@ import { ReportDashboard } from "@/components/report-dashboard";
 import { getAiHealthStatus } from "@/lib/ai/ai-health";
 import { ensureReportAnalysisRecovery } from "@/lib/ai/report-analysis-recovery";
 import { getCurrentAuthFromCookies } from "@/lib/auth/server";
-import { listReports, toPublicReport } from "@/lib/report-store";
+import { getReportListPageSize } from "@/lib/report-list-config";
+import { listReportsPage } from "@/lib/report-store";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,14 +16,20 @@ export default async function HomePage() {
 
   await ensureReportAnalysisRecovery();
 
-  const [reports, aiHealth] = await Promise.all([
-    listReports(auth.user.id),
+  const [reportsPage, aiHealth] = await Promise.all([
+    listReportsPage({
+      userId: auth.user.id,
+      limit: getReportListPageSize(),
+    }),
     getAiHealthStatus(),
   ]);
 
   return (
     <ReportDashboard
-      initialReports={reports.map(toPublicReport)}
+      initialReports={reportsPage.reports}
+      initialNextCursor={reportsPage.nextCursor}
+      initialHasMore={reportsPage.hasMore}
+      initialSummary={reportsPage.summary}
       initialAiHealth={aiHealth}
     />
   );

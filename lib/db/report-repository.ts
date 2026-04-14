@@ -1,4 +1,4 @@
-import type { StoredReport } from "@/lib/report-types";
+import type { ReportListPage, ReportListSummary, StoredReport } from "@/lib/report-types";
 
 export type ReportMetadataInput = {
   id: string;
@@ -20,6 +20,7 @@ export type ReportRepository = {
   findById(reportId: string): Promise<StoredReport | null>;
   findByIdForUser(reportId: string, userId: string): Promise<StoredReport | null>;
   list(userId?: string): Promise<StoredReport[]>;
+  listPage(input: { userId?: string; cursor?: string | null; limit: number }): Promise<ReportListPage>;
+  getSummary(userId?: string): Promise<ReportListSummary>;
   delete(reportId: string, userId?: string): Promise<void>;
-  claimUnownedReports(userId: string): Promise<number>;
 };

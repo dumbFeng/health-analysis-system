@@ -5,12 +5,17 @@ import {
   createStoredReport,
   deleteReport,
   getReport,
-  listReports,
+  listReportsPage,
   toPublicReport,
 } from "@/lib/report-store";
 import { enqueueReportAnalysis } from "@/lib/ai/health-report-analyzer";
 import { logger } from "@/lib/logger";
 import { uploadQueue } from "@/lib/queue/report-queues";
+import {
+  buildReportAnalysisRateLimitMessage,
+  consumeReportAnalysisQuota,
+} from "@/lib/rate-limit/report-analysis-rate-limit";
+import { getReportListPageSize } from "@/lib/report-list-config";
 
 export const runtime = "nodejs";
 
@@ -21,12 +26,23 @@ export async function GET(request: Request) {
   }
 
   await ensureReportAnalysisRecovery();
-
-  const reports = await listReports(auth.user.id);
-  await logger.debug("查询报告列表", {
-    count: reports.length,
+  const { searchParams } = new URL(request.url);
+  const cursor = searchParams.get("cursor");
+  const requestedLimit = Number.parseInt(searchParams.get("limit") || "", 10);
+  const limit =
+    Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? requestedLimit
+      : getReportListPageSize();
+  const page = await listReportsPage({
+    userId: auth.user.id,
+    cursor,
+    limit,
   });
-  return NextResponse.json({ reports: reports.map(toPublicReport) });
+  await logger.debug("查询报告列表", {
+    count: page.reports.length,
+    hasMore: page.hasMore,
+  });
+  return NextResponse.json(page);
 }
 
 export async function POST(request: Request) {
@@ -64,6 +80,22 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(
       { error: "当前上传任务较多，请稍后再试。" },
+      { status: 429 },
+    );
+  }
+
+  const quota = consumeReportAnalysisQuota(auth.user.id);
+  if (!quota.ok) {
+    await logger.warn("上传报告失败：触发报告分析限频", {
+      userId: auth.user.id,
+      retryAfterSeconds: quota.retryAfterSeconds,
+      window: quota.violatedRule.windowLabel,
+      limit: quota.violatedRule.maxCount,
+    });
+    return NextResponse.json(
+      {
+        error: buildReportAnalysisRateLimitMessage(quota),
+      },
       { status: 429 },
     );
   }

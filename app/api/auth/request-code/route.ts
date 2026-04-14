@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAuthDevReturnCode } from "@/lib/auth/auth-config";
 import { isValidPhone, normalizePhone } from "@/lib/auth/phone";
 import { createLoginCode } from "@/lib/auth/sqlite-auth-repository";
 import { logger } from "@/lib/logger";
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
       expiresAt: loginCode.expiresAt,
       devCode:
         process.env.NODE_ENV !== "production" &&
-        (getSmsProviderName() === "dev" || process.env.AUTH_DEV_RETURN_CODE === "true")
+        (getSmsProviderName() === "dev" || getAuthDevReturnCode())
           ? loginCode.code
           : undefined,
     });

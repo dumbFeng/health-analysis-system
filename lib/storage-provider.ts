@@ -1,14 +1,18 @@
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import OSS from "ali-oss";
+import { getLegacyProjectStorageRoot, getLocalStorageRoot } from "@/lib/app-data-paths";
 import type { StorageMode } from "@/lib/report-types";
 
 const storageMode = (process.env.REPORT_STORAGE_MODE || "local") as StorageMode;
-const localRoot = path.join(process.cwd(), "storage", "local");
+const localRoot = getLocalStorageRoot();
 const localUploadsRoot = path.join(localRoot, "uploads");
 const localReportsRoot = path.join(localRoot, "reports");
-const localUploadsRelativeRoot = path.join("storage", "local", "uploads");
-const localReportsRelativeRoot = path.join("storage", "local", "reports");
+const localUploadsRelativeRoot = "uploads";
+const localReportsRelativeRoot = "reports";
+const legacyLocalRoot = getLegacyProjectStorageRoot();
+const legacyUploadsRoot = path.join(legacyLocalRoot, "uploads");
+const legacyReportsRoot = path.join(legacyLocalRoot, "reports");
 
 const ossPrefix = (process.env.OSS_BASE_PREFIX || "health-reports").replace(
   /^\/+|\/+$/g,
@@ -25,6 +29,28 @@ function getLocalRelativeBaseDir(category: StorageCategory) {
   return category === "upload"
     ? localUploadsRelativeRoot
     : localReportsRelativeRoot;
+}
+
+function getLegacyLocalBaseDir(category: StorageCategory) {
+  return category === "upload" ? legacyUploadsRoot : legacyReportsRoot;
+}
+
+async function readLocalFileWithFallback(key: string, category: StorageCategory) {
+  const primaryPath = path.join(getLocalBaseDir(category), key);
+  try {
+    return await readFile(primaryPath);
+  } catch (error) {
+    const legacyPath = path.join(getLegacyLocalBaseDir(category), key);
+    if (legacyPath === primaryPath) {
+      throw error;
+    }
+
+    try {
+      return await readFile(legacyPath);
+    } catch {
+      throw error;
+    }
+  }
 }
 
 function ensureOssConfig() {
@@ -123,8 +149,29 @@ export function getStorageKeyFromPath(pathOrKey: string, category: StorageCatego
     return pathOrKey.startsWith(prefix) ? pathOrKey.slice(prefix.length) : pathOrKey;
   }
 
-  const prefix = `${getLocalRelativeBaseDir(category)}${path.sep}`;
-  return pathOrKey.startsWith(prefix) ? pathOrKey.slice(prefix.length) : pathOrKey;
+  const normalized = pathOrKey.replaceAll("\\", "/");
+  const relativePrefix = `${getLocalRelativeBaseDir(category)}/`;
+  const legacyRelativePrefix = `storage/local/${getLocalRelativeBaseDir(category)}/`;
+  const absolutePrefix = `${getLocalBaseDir(category).replaceAll("\\", "/")}/`;
+  const legacyAbsolutePrefix = `${getLegacyLocalBaseDir(category).replaceAll("\\", "/")}/`;
+
+  if (normalized.startsWith(relativePrefix)) {
+    return normalized.slice(relativePrefix.length);
+  }
+
+  if (normalized.startsWith(legacyRelativePrefix)) {
+    return normalized.slice(legacyRelativePrefix.length);
+  }
+
+  if (normalized.startsWith(absolutePrefix)) {
+    return normalized.slice(absolutePrefix.length);
+  }
+
+  if (normalized.startsWith(legacyAbsolutePrefix)) {
+    return normalized.slice(legacyAbsolutePrefix.length);
+  }
+
+  return normalized;
 }
 
 export function getStoredFileUrl(key: string, category: StorageCategory) {
@@ -189,8 +236,7 @@ export async function readStoredFile(
   category: StorageCategory,
 ): Promise<Buffer> {
   if (getStorageMode() === "local") {
-    const fullPath = path.join(getLocalBaseDir(category), key);
-    return readFile(fullPath);
+    return readLocalFileWithFallback(key, category);
   }
 
   const client = getOssClient();
@@ -203,7 +249,19 @@ export async function listStoredKeys(category: StorageCategory) {
   if (getStorageMode() === "local") {
     const baseDir = getLocalBaseDir(category);
     await mkdir(baseDir, { recursive: true });
-    return walkLocalFiles(baseDir);
+    const keys = new Set<string>(await walkLocalFiles(baseDir));
+    const legacyBaseDir = getLegacyLocalBaseDir(category);
+
+    if (legacyBaseDir !== baseDir) {
+      try {
+        await access(legacyBaseDir);
+        for (const key of await walkLocalFiles(legacyBaseDir)) {
+          keys.add(key);
+        }
+      } catch {}
+    }
+
+    return Array.from(keys).sort();
   }
 
   const prefix = `${ossPrefix}/${category === "upload" ? "uploads" : "reports"}/`;
@@ -215,6 +273,11 @@ export async function deleteStoredFile(key: string, category: StorageCategory) {
   if (getStorageMode() === "local") {
     const fullPath = path.join(getLocalBaseDir(category), key);
     await rm(fullPath, { force: true });
+
+    const legacyPath = path.join(getLegacyLocalBaseDir(category), key);
+    if (legacyPath !== fullPath) {
+      await rm(legacyPath, { force: true });
+    }
     return;
   }
 

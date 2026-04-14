@@ -18,3 +18,9 @@ export type AuthSession = {
   identityType: AuthIdentityType;
   identityMasked: string;
 };
+
+export type PendingSignupSession = {
+  email: string;
+  identityType: "email";
+  adminLogin: boolean;
+};
