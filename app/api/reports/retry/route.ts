@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger";
 import {
   buildReportAnalysisRateLimitMessage,
   consumeReportAnalysisQuota,
+  releaseReportAnalysisQuotaEvent,
 } from "@/lib/rate-limit/report-analysis-rate-limit";
 
 export const runtime = "nodejs";
@@ -83,17 +84,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const report = await updateReport(id, (current) => ({
-    ...current,
-    status: "analyzing",
-    retryCount: current.retryCount + 1,
-    errorMessage: null,
-  }), auth.user.id);
-  await logger.info("手动触发报告重试分析", {
-    reportId: id,
-  });
+  const consumedEventId = quota.consumedEventId;
 
-  enqueueReportAnalysis(id);
+  try {
+    const report = await updateReport(id, (current) => ({
+      ...current,
+      status: "analyzing",
+      retryCount: current.retryCount + 1,
+      errorMessage: null,
+    }), auth.user.id);
+    await logger.info("手动触发报告重试分析", {
+      reportId: id,
+    });
 
-  return NextResponse.json({ report: toPublicReport(report) }, { status: 202 });
+    enqueueReportAnalysis(id);
+
+    return NextResponse.json({ report: toPublicReport(report) }, { status: 202 });
+  } catch (error) {
+    if (consumedEventId != null) {
+      releaseReportAnalysisQuotaEvent(consumedEventId);
+    }
+    await logger.warn("手动重试分析失败：执行异常", {
+      reportId: id,
+      userId: auth.user.id,
+      error,
+    });
+    return NextResponse.json({ error: "重试失败，请稍后再试。" }, { status: 500 });
+  }
 }

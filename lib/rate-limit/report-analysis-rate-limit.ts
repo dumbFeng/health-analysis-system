@@ -12,6 +12,8 @@ type RateLimitRule = {
 type ConsumeResult =
   | {
       ok: true;
+      /** Present when a rate row was inserted; call `releaseReportAnalysisQuotaEvent` if the upload/analysis request later fails. */
+      consumedEventId?: number;
     }
   | {
       ok: false;
@@ -199,8 +201,28 @@ export function buildReportAnalysisRateLimitMessage(result: Extract<ConsumeResul
   return `${windowLabel}的分析次数已用完，请 ${waitLabel} 后再试。`;
 }
 
+/**
+ * Rolls back a quota consumption when the request failed after `consumeReportAnalysisQuota` succeeded
+ * (e.g. file write or DB insert error). Idempotent for unknown ids.
+ */
+export function releaseReportAnalysisQuotaEvent(consumedEventId: number): void {
+  if (!Number.isFinite(consumedEventId) || consumedEventId <= 0) {
+    return;
+  }
+
+  const database = getDatabase();
+  database
+    .prepare(`DELETE FROM report_analysis_rate_events WHERE id = ?`)
+    .run(consumedEventId);
+}
+
 export function consumeReportAnalysisQuota(userId: string): ConsumeResult {
-  if (isRateLimitBypassedUser(userId)) {
+  const uid = userId.trim();
+  if (!uid) {
+    return { ok: true };
+  }
+
+  if (isRateLimitBypassedUser(uid)) {
     return { ok: true };
   }
 
@@ -239,10 +261,10 @@ export function consumeReportAnalysisQuota(userId: string): ConsumeResult {
 
     for (const rule of rules) {
       const start = now - rule.windowMs;
-      const countRow = countStatement.get(userId, start) as { count: number };
+      const countRow = countStatement.get(uid, start) as { count: number };
       const used = Number(countRow?.count || 0);
       if (used >= rule.maxCount) {
-        const firstRow = firstStatement.get(userId, start) as
+        const firstRow = firstStatement.get(uid, start) as
           | { created_at_ms: number }
           | undefined;
         const retryAfterMs = firstRow
@@ -258,9 +280,12 @@ export function consumeReportAnalysisQuota(userId: string): ConsumeResult {
       }
     }
 
-    insertStatement.run(userId, now);
+    const insertResult = insertStatement.run(uid, now) as { lastInsertRowid: number };
     database.exec("COMMIT;");
-    return { ok: true };
+    return {
+      ok: true,
+      consumedEventId: Number(insertResult.lastInsertRowid),
+    };
   } catch (error) {
     database.exec("ROLLBACK;");
     throw error;

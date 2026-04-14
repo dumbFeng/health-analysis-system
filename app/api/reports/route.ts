@@ -14,6 +14,7 @@ import { uploadQueue } from "@/lib/queue/report-queues";
 import {
   buildReportAnalysisRateLimitMessage,
   consumeReportAnalysisQuota,
+  releaseReportAnalysisQuotaEvent,
 } from "@/lib/rate-limit/report-analysis-rate-limit";
 import { getReportListPageSize } from "@/lib/report-list-config";
 
@@ -112,45 +113,59 @@ export async function POST(request: Request) {
     );
   }
 
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const report = await uploadQueue.enqueue(
-    `upload:${file.name}:${Date.now()}`,
-    async () => {
-      await logger.info("上传任务开始执行", {
-        fileName: file.name,
-        fileSize: file.size,
-        queue: uploadQueue.getStats(),
-      });
+  const consumedEventId = quota.consumedEventId;
 
-      const createdReport = await createStoredReport({
-        userId: auth.user.id,
-        fileName: file.name,
-        mimeType: file.type || "application/pdf",
-        fileSize: file.size,
-        bytes,
-        requestedProvider: selectedModel?.provider || null,
-        requestedModel: selectedModel?.model || null,
-      });
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const report = await uploadQueue.enqueue(
+      `upload:${file.name}:${Date.now()}`,
+      async () => {
+        await logger.info("上传任务开始执行", {
+          fileName: file.name,
+          fileSize: file.size,
+          queue: uploadQueue.getStats(),
+        });
 
-      await logger.info("上传任务执行完成", {
-        reportId: createdReport.id,
-        fileName: file.name,
-        queue: uploadQueue.getStats(),
-      });
+        const createdReport = await createStoredReport({
+          userId: auth.user.id,
+          fileName: file.name,
+          mimeType: file.type || "application/pdf",
+          fileSize: file.size,
+          bytes,
+          requestedProvider: selectedModel?.provider || null,
+          requestedModel: selectedModel?.model || null,
+        });
 
-      return createdReport;
-    },
-  );
+        await logger.info("上传任务执行完成", {
+          reportId: createdReport.id,
+          fileName: file.name,
+          queue: uploadQueue.getStats(),
+        });
 
-  await logger.info("报告上传成功", {
-    reportId: report.id,
-    fileName: file.name,
-    fileSize: file.size,
-  });
+        return createdReport;
+      },
+    );
 
-  enqueueReportAnalysis(report.id);
+    await logger.info("报告上传成功", {
+      reportId: report.id,
+      fileName: file.name,
+      fileSize: file.size,
+    });
 
-  return NextResponse.json({ report: toPublicReport(report) }, { status: 201 });
+    enqueueReportAnalysis(report.id);
+
+    return NextResponse.json({ report: toPublicReport(report) }, { status: 201 });
+  } catch (error) {
+    if (consumedEventId != null) {
+      releaseReportAnalysisQuotaEvent(consumedEventId);
+    }
+    await logger.warn("上传报告失败：执行异常", {
+      fileName: file.name,
+      userId: auth.user.id,
+      error,
+    });
+    return NextResponse.json({ error: "上传失败，请稍后重试。" }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: Request) {
