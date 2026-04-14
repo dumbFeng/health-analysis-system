@@ -29,6 +29,8 @@ type ReportRow = {
   exam_date: string | null;
   institution: string | null;
   summary: string | null;
+  requested_provider: string | null;
+  requested_model: string | null;
   analysis_model: string | null;
   overall_risk_level: StoredReport["overallRiskLevel"];
   risk_score: number | null;
@@ -233,6 +235,8 @@ function getDatabase() {
     migrateLegacyStorageColumns(database);
     ensureReportOwnershipColumn(database);
     ensureColumn(database, "reports", "analysis_model", "TEXT");
+    ensureColumn(database, "reports", "requested_provider", "TEXT");
+    ensureColumn(database, "reports", "requested_model", "TEXT");
     ensureColumn(database, "reports", "overall_risk_level", "TEXT");
     ensureColumn(database, "reports", "risk_score", "INTEGER");
     ensureColumn(database, "reports", "retry_count", "INTEGER NOT NULL DEFAULT 0");
@@ -286,6 +290,8 @@ function rowToReport(row: ReportRow): StoredReport {
     examDate: row.exam_date,
     institution: row.institution,
     summary: row.summary,
+    requestedProvider: row.requested_provider,
+    requestedModel: row.requested_model,
     analysisModel: row.analysis_model,
     overallRiskLevel: row.overall_risk_level,
     riskScore: row.risk_score,
@@ -342,6 +348,8 @@ export class SqliteReportRepository implements ReportRepository {
       examDate: null,
       institution: null,
       summary: null,
+      requestedProvider: input.requestedProvider,
+      requestedModel: input.requestedModel,
       analysisModel: null,
       overallRiskLevel: null,
       riskScore: null,
@@ -364,9 +372,9 @@ export class SqliteReportRepository implements ReportRepository {
           id, owner_user_id, file_name, storage_mode, source_file_path, analysis_file_path,
           mime_type, file_size, created_at, updated_at, status, retry_count,
           patient_name, exam_date, institution, summary,
-          analysis_model, overall_risk_level, risk_score, error_message
+          requested_provider, requested_model, analysis_model, overall_risk_level, risk_score, error_message
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           owner_user_id = excluded.owner_user_id,
           file_name = excluded.file_name,
@@ -383,6 +391,8 @@ export class SqliteReportRepository implements ReportRepository {
           exam_date = excluded.exam_date,
           institution = excluded.institution,
           summary = excluded.summary,
+          requested_provider = excluded.requested_provider,
+          requested_model = excluded.requested_model,
           analysis_model = excluded.analysis_model,
           overall_risk_level = excluded.overall_risk_level,
           risk_score = excluded.risk_score,
@@ -405,6 +415,8 @@ export class SqliteReportRepository implements ReportRepository {
         normalized.examDate,
         normalized.institution,
         normalized.summary,
+        normalized.requestedProvider,
+        normalized.requestedModel,
         normalized.analysisModel,
         normalized.overallRiskLevel,
         normalized.riskScore,
@@ -442,6 +454,28 @@ export class SqliteReportRepository implements ReportRepository {
           .all() as ReportRow[]);
 
     return rows.map(rowToReport);
+  }
+
+  async listIdsByStatus(status: StoredReport["status"], userId?: string) {
+    const database = getDatabase();
+    ensureReportOwnershipColumn(database);
+    const rows = userId
+      ? (database
+          .prepare(`
+            SELECT id FROM reports
+            WHERE status = ? AND owner_user_id = ?
+            ORDER BY updated_at DESC, id DESC
+          `)
+          .all(status, userId) as Array<{ id: string }>)
+      : (database
+          .prepare(`
+            SELECT id FROM reports
+            WHERE status = ?
+            ORDER BY updated_at DESC, id DESC
+          `)
+          .all(status) as Array<{ id: string }>);
+
+    return rows.map((row) => row.id);
   }
 
   async listPage(input: { userId?: string; cursor?: string | null; limit: number }): Promise<ReportListPage> {

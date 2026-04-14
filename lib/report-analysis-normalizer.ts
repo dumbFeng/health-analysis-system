@@ -584,6 +584,10 @@ export function normalizeStoredReport(report: StoredReport): StoredReport {
         typeof report.retryCount === "number" && Number.isFinite(report.retryCount)
           ? Math.max(0, Math.floor(report.retryCount))
           : 0,
+      requestedProvider:
+        typeof report.requestedProvider === "string" ? report.requestedProvider : null,
+      requestedModel:
+        typeof report.requestedModel === "string" ? report.requestedModel : null,
       analysisModel:
         typeof report.analysisModel === "string" ? report.analysisModel : null,
       overallRiskLevel:
@@ -608,6 +612,10 @@ export function normalizeStoredReport(report: StoredReport): StoredReport {
       typeof report.retryCount === "number" && Number.isFinite(report.retryCount)
         ? Math.max(0, Math.floor(report.retryCount))
         : 0,
+    requestedProvider:
+      typeof report.requestedProvider === "string" ? report.requestedProvider : null,
+    requestedModel:
+      typeof report.requestedModel === "string" ? report.requestedModel : null,
     patientName: analysis.patient.name || report.patientName,
     examDate: analysis.reportMeta.examDate || report.examDate,
     institution: analysis.reportMeta.institution || report.institution,

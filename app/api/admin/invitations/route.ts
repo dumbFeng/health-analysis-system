@@ -4,12 +4,13 @@ import {
   createInviteCodeRecord,
   listInviteCodeRecords,
 } from "@/lib/auth/sqlite-auth-repository";
+import { buildAppUrlFromRequestUrl } from "@/lib/app-base-url";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
 function buildInviteLink(request: Request, inviteCode: string) {
-  const url = new URL("/login", request.url);
+  const url = new URL("/login", buildAppUrlFromRequestUrl(request.url));
   url.searchParams.set("inviteCode", inviteCode);
   return url.toString();
 }

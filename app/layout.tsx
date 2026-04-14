@@ -4,6 +4,9 @@ import { RootChrome } from "@/components/root-chrome";
 import { getCurrentAuthFromCookies } from "@/lib/auth/server";
 import "./globals.css";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata: Metadata = {
   title: "知几 CareYou",
   description: "知几 CareYou，基于体检结果的家庭健康风险分层与就诊建议展示系统",

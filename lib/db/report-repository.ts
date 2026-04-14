@@ -12,6 +12,8 @@ export type ReportMetadataInput = {
   createdAt: string;
   updatedAt: string;
   status: StoredReport["status"];
+  requestedProvider: string | null;
+  requestedModel: string | null;
 };
 
 export type ReportRepository = {
@@ -20,6 +22,7 @@ export type ReportRepository = {
   findById(reportId: string): Promise<StoredReport | null>;
   findByIdForUser(reportId: string, userId: string): Promise<StoredReport | null>;
   list(userId?: string): Promise<StoredReport[]>;
+  listIdsByStatus(status: StoredReport["status"], userId?: string): Promise<string[]>;
   listPage(input: { userId?: string; cursor?: string | null; limit: number }): Promise<ReportListPage>;
   getSummary(userId?: string): Promise<ReportListSummary>;
   delete(reportId: string, userId?: string): Promise<void>;

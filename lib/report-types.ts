@@ -140,6 +140,8 @@ export type StoredReport = {
   examDate: string | null;
   institution: string | null;
   summary: string | null;
+  requestedProvider: string | null;
+  requestedModel: string | null;
   analysisModel: string | null;
   overallRiskLevel: RiskLevel | null;
   riskScore: number | null;

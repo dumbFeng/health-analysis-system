@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AiHealthCheckResult } from "@/lib/ai/ai-provider";
+import type { AiModelOption } from "@/lib/ai/ai-model-options";
 import type { PublicReport, ReportListSummary } from "@/lib/report-types";
 
 type DashboardProps = {
@@ -10,7 +10,6 @@ type DashboardProps = {
   initialNextCursor: string | null;
   initialHasMore: boolean;
   initialSummary: ReportListSummary;
-  initialAiHealth: AiHealthCheckResult;
 };
 
 const statusMeta = {
@@ -79,15 +78,14 @@ export function ReportDashboard({
   initialNextCursor,
   initialHasMore,
   initialSummary,
-  initialAiHealth,
 }: DashboardProps) {
   const [reports, setReports] = useState(initialReports);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [summary, setSummary] = useState(initialSummary);
-  const [aiHealth, setAiHealth] = useState(initialAiHealth);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [reportPendingDelete, setReportPendingDelete] = useState<PublicReport | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -95,6 +93,11 @@ export function ReportDashboard({
   const [copiedReportId, setCopiedReportId] = useState<string | null>(null);
   const [selectedPatient, setSelectedPatient] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("all");
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [modelOptions, setModelOptions] = useState<AiModelOption[]>([]);
+  const [isModelOptionsLoading, setIsModelOptionsLoading] = useState(false);
+  const [selectedUploadModelId, setSelectedUploadModelId] = useState(modelOptions[0]?.id || "");
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -147,6 +150,25 @@ export function ReportDashboard({
     }
   }
 
+  async function refreshModelOptions() {
+    setIsModelOptionsLoading(true);
+    try {
+      const response = await fetch("/api/ai/model-options", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+
+      const data = (await response.json()) as {
+        modelOptions?: AiModelOption[];
+      };
+      setModelOptions(Array.isArray(data.modelOptions) ? data.modelOptions : []);
+    } catch {
+      // 弹窗打开不应被接口异常阻塞，保留当前快照。
+    } finally {
+      setIsModelOptionsLoading(false);
+    }
+  }
+
   useEffect(() => {
     setReports(initialReports);
   }, [initialReports]);
@@ -164,8 +186,26 @@ export function ReportDashboard({
   }, [initialSummary]);
 
   useEffect(() => {
-    setAiHealth(initialAiHealth);
-  }, [initialAiHealth]);
+    if (!isUploadDialogOpen) {
+      return;
+    }
+
+    void refreshModelOptions();
+  }, [isUploadDialogOpen]);
+
+  useEffect(() => {
+    setSelectedUploadModelId((current) => {
+      if (modelOptions.length === 0) {
+        return "";
+      }
+
+      if (modelOptions.some((item) => item.id === current)) {
+        return current;
+      }
+
+      return modelOptions[0]!.id;
+    });
+  }, [modelOptions]);
 
   useEffect(() => {
     if (!openMenuId) {
@@ -250,8 +290,11 @@ export function ReportDashboard({
 
     const body = new FormData();
     body.append("file", file);
+    if (selectedUploadModelId) {
+      body.append("modelId", selectedUploadModelId);
+    }
 
-    setIsBusy(true);
+    setIsUploading(true);
     try {
       const response = await fetch("/api/reports", {
         method: "POST",
@@ -279,8 +322,10 @@ export function ReportDashboard({
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+      setSelectedUploadFile(null);
+      setIsUploadDialogOpen(false);
     } finally {
-      setIsBusy(false);
+      setIsUploading(false);
     }
   }
 
@@ -348,12 +393,19 @@ export function ReportDashboard({
     }, 1600);
   }
 
+  function openUploadDialog() {
+    setUploadError(null);
+    setIsUploadDialogOpen(true);
+  }
+
   return (
     <main className="px-4 py-4 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-7xl">
-        <section aria-label="体检报告分析">
-        <section className="relative overflow-hidden border-b border-stone-200/70 py-5 sm:py-6 lg:py-8">
-          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-r from-emerald-100/30 via-amber-50/35 to-orange-100/25 blur-3xl" />
+        <section
+          aria-label="体检报告分析"
+          className="relative overflow-hidden border-b border-stone-200/70 py-5 sm:py-6 lg:py-8"
+        >
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-r from-emerald-100/30 via-amber-50/35 to-orange-100/25 blur-3xl" />
           <div className="relative grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
             <div className="space-y-5">
               <div className="space-y-4">
@@ -368,36 +420,14 @@ export function ReportDashboard({
             </div>
 
             <div className="rounded-[1.8rem] border border-stone-200/70 bg-white/75 p-5 shadow-[0_18px_40px_rgba(102,84,58,0.08)]">
-              <p className="section-title">上传入口</p>
-
-              <label
-                className={`mt-4 flex flex-col items-center justify-center rounded-[1.6rem] border border-dashed px-6 py-10 text-center transition ${
-                  isBusy
-                    ? "cursor-not-allowed border-stone-200 bg-stone-100/90 opacity-75"
-                    : "cursor-pointer border-stone-300 bg-stone-50/90 hover:border-emerald-600 hover:bg-white"
-                }`}
-              >
-                <span className="text-lg font-semibold text-stone-900">
-                  选择 PDF 体检报告
-                </span>
-                <span className="mt-2 text-sm leading-6 text-stone-600">
-                  当前先只支持单个 PDF 上传。上传后会自动进入“分析中”状态。
-                </span>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  className="hidden"
-                  disabled={isBusy}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file && !isBusy) {
-                      void handleUpload(file);
-                    }
-                  }}
-                />
-              </label>
-
+              <button
+                  type="button"
+                  disabled={false}
+                  onClick={openUploadDialog}
+                  className="button-primary mt-5 rounded-full px-5 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  新建上传任务
+                </button>
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-[1.2rem] bg-sky-50 px-4 py-4 text-sky-900">
                   <p className="text-xs tracking-[0.16em] text-sky-700 uppercase">
@@ -510,14 +540,14 @@ export function ReportDashboard({
               </p>
             </div>
           ) : (
-            <div className="mt-4 grid grid-cols-2 gap-3 lg:gap-4">
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:gap-4">
               {filteredReports.map((report) => {
                 const status = statusMeta[report.status];
 
                 return (
                   <article
                     key={report.id}
-                    className="rounded-[1.25rem] border border-stone-200/70 bg-white/75 p-3 shadow-[0_14px_30px_rgba(102,84,58,0.06)] sm:rounded-[1.6rem] sm:p-5"
+                    className="rounded-[1.25rem] border border-stone-200/70 bg-white p-3 shadow-[0_14px_30px_rgba(102,84,58,0.06)] [transform:translateZ(0)] sm:rounded-[1.6rem] sm:p-5"
                   >
                     <div className="flex items-start justify-between gap-2 sm:gap-3">
                       <div className="flex min-w-0 flex-col gap-2 sm:flex-wrap sm:flex-row sm:items-center sm:gap-3">
@@ -541,7 +571,7 @@ export function ReportDashboard({
                                 current === report.id ? null : report.id,
                               );
                             }}
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white/85 text-stone-500 transition hover:border-stone-300 hover:text-stone-900 sm:h-10 sm:w-10"
+                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white/85 text-stone-500 transition hover:border-stone-300 hover:text-stone-900 sm:h-10 sm:w-10"
                           >
                             <span className="text-base leading-none sm:text-lg">...</span>
                           </button>
@@ -584,7 +614,7 @@ export function ReportDashboard({
                         onClick={() => {
                           void handleCopyReportId(report.id);
                         }}
-                        className="shrink-0 rounded-full border border-stone-200 bg-white px-2 py-1 text-[10px] font-medium text-stone-600 transition hover:border-emerald-300 hover:text-emerald-700 sm:text-xs"
+                        className="shrink-0 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:border-emerald-300 hover:text-emerald-700 sm:text-xs"
                       >
                         {copiedReportId === report.id ? "已复制" : "复制"}
                       </button>
@@ -701,7 +731,6 @@ export function ReportDashboard({
             </div>
           ) : null}
         </section>
-        </section>
       </div>
 
       {reportPendingDelete ? (
@@ -745,6 +774,112 @@ export function ReportDashboard({
                 className="rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {pendingDeleteId === reportPendingDelete.id ? "删除中..." : "确认删除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isUploadDialogOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/35 px-4">
+          <div className="w-full max-w-lg rounded-[2rem] border border-stone-200/80 bg-[var(--panel-strong)] p-6 shadow-[0_24px_60px_rgba(28,25,23,0.22)]">
+            {/* <p className="section-title">上传体检报告</p> */}
+            <h3 className="mt-3 text-2xl font-semibold text-stone-900">创建分析任务</h3>
+            <div className="mt-6 space-y-4">
+              <label className="block">
+                <span className="text-sm font-medium text-stone-700">体检报告</span>
+                <div className="mt-2 rounded-[1.2rem] border border-dashed border-stone-300 bg-white/80 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-stone-900">
+                        {selectedUploadFile ? "已选择文件" : "选择 PDF 文件"}
+                      </p>
+                      {/* <p className="mt-1 truncate text-sm text-stone-600">
+                        {selectedUploadFile
+                          ? `${selectedUploadFile.name} · ${formatFileSize(selectedUploadFile.size)}`
+                          : "仅支持 PDF"}
+                      </p> */}
+                    </div>
+                    <label className="inline-flex shrink-0 cursor-pointer rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-emerald-300 hover:text-emerald-700">
+                      选择文件
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        className="hidden"
+                        disabled={isUploading}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0] || null;
+                          setSelectedUploadFile(file);
+                          setUploadError(null);
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-stone-700">分析模型</span>
+                <select
+                  value={selectedUploadModelId}
+                  onChange={(event) => {
+                    setSelectedUploadModelId(event.target.value);
+                  }}
+                  disabled={modelOptions.length === 0 || isUploading || isModelOptionsLoading}
+                  className="mt-2 w-full rounded-[1.2rem] border border-stone-200/80 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition focus:border-emerald-400"
+                >
+                  {isModelOptionsLoading ? (
+                    <option value="">正在刷新可用模型...</option>
+                  ) : null}
+                  {modelOptions.length === 0 && !isModelOptionsLoading ? (
+                    <option value="">暂无可用模型</option>
+                  ) : null}
+                  {modelOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {uploadError ? (
+                <p className="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-700">
+                  {uploadError}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                disabled={isUploading}
+                onClick={() => {
+                  setIsUploadDialogOpen(false);
+                  setSelectedUploadFile(null);
+                  setUploadError(null);
+                }}
+                className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={isUploading || modelOptions.length === 0}
+                onClick={() => {
+                  if (modelOptions.length === 0) {
+                    setUploadError("当前暂无可用模型，请稍后再试。");
+                    return;
+                  }
+                  if (selectedUploadFile && !isUploading) {
+                    void handleUpload(selectedUploadFile);
+                    return;
+                  }
+                  setUploadError("请先选择 PDF 文件。");
+                }}
+                className="button-primary rounded-full px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isUploading ? "提交中..." : "开始分析"}
               </button>
             </div>
           </div>

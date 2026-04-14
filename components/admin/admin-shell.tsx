@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/brand-mark";
 import type { AdminNavItem } from "@/lib/navigation/admin-nav-items";
 
@@ -23,6 +23,13 @@ export function AdminShell({ currentUser, navItems, children }: AdminShellProps)
   const pathname = usePathname();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
+  useEffect(() => {
+    // 通过绑定 unload 处理器禁用 bfcache，避免从 admin 回退后首页交互偶发失效。
+    const disableBfcache = () => {};
+    window.addEventListener("unload", disableBfcache);
+    return () => window.removeEventListener("unload", disableBfcache);
+  }, []);
+
   async function handleLogout() {
     setIsLoggingOut(true);
     try {
@@ -35,15 +42,15 @@ export function AdminShell({ currentUser, navItems, children }: AdminShellProps)
   return (
     <div className="min-h-screen bg-transparent">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)]">
-        <aside className="border-r border-[var(--line)] bg-[#fff8ef]/86 backdrop-blur-sm">
-          <div className="sticky top-0 flex min-h-screen flex-col px-5 py-6">
+        <aside className="border-b border-[var(--line)] bg-[#fff8ef]/86 backdrop-blur-sm lg:border-r lg:border-b-0">
+          <div className="flex flex-col px-5 py-4 lg:sticky lg:top-0 lg:min-h-screen lg:py-6">
             <Link href="/" className="inline-flex">
               <BrandMark compact iconClassName="h-10 w-10 rounded-[0.9rem]" textClassName="text-lg" />
             </Link>
 
-            <div className="mt-8">
+            <div className="mt-6 lg:mt-8">
               <p className="text-xs tracking-[0.16em] text-stone-500 uppercase">管理后台</p>
-              <nav className="mt-4 space-y-1">
+              <nav className="mt-4 grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
                 {navItems.map((item) => {
                   const active = isActive(pathname, item.href);
                   return (
@@ -64,7 +71,7 @@ export function AdminShell({ currentUser, navItems, children }: AdminShellProps)
               </nav>
             </div>
 
-            <div className="mt-auto rounded-lg border border-[var(--line)] bg-white/72 px-4 py-4">
+            <div className="mt-4 rounded-lg border border-[var(--line)] bg-white/72 px-4 py-4 lg:mt-auto">
               <p className="text-xs tracking-[0.14em] text-stone-500 uppercase">当前管理员</p>
               <p className="mt-2 break-all text-sm font-semibold leading-6 text-stone-900">
                 {currentUser.username}

@@ -1,5 +1,4 @@
 import { ReportDashboard } from "@/components/report-dashboard";
-import { getAiHealthStatus } from "@/lib/ai/ai-health";
 import { ensureReportAnalysisRecovery } from "@/lib/ai/report-analysis-recovery";
 import { getCurrentAuthFromCookies } from "@/lib/auth/server";
 import { getReportListPageSize } from "@/lib/report-list-config";
@@ -14,23 +13,18 @@ export default async function HomePage() {
     return null;
   }
 
-  await ensureReportAnalysisRecovery();
+  void ensureReportAnalysisRecovery();
 
-  const [reportsPage, aiHealth] = await Promise.all([
-    listReportsPage({
-      userId: auth.user.id,
-      limit: getReportListPageSize(),
-    }),
-    getAiHealthStatus(),
-  ]);
-
+  const reportsPage = await listReportsPage({
+    userId: auth.user.id,
+    limit: getReportListPageSize(),
+  });
   return (
     <ReportDashboard
       initialReports={reportsPage.reports}
       initialNextCursor={reportsPage.nextCursor}
       initialHasMore={reportsPage.hasMore}
       initialSummary={reportsPage.summary}
-      initialAiHealth={aiHealth}
     />
   );
 }

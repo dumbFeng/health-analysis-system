@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { ensureReportAnalysisRecovery } from "@/lib/ai/report-analysis-recovery";
 import { createUnauthorizedResponse, requireAuth } from "@/lib/auth/server";
 import {
   createStoredReport,
@@ -8,6 +7,7 @@ import {
   listReportsPage,
   toPublicReport,
 } from "@/lib/report-store";
+import { findAiModelOptionById } from "@/lib/ai/ai-model-options";
 import { enqueueReportAnalysis } from "@/lib/ai/health-report-analyzer";
 import { logger } from "@/lib/logger";
 import { uploadQueue } from "@/lib/queue/report-queues";
@@ -25,7 +25,6 @@ export async function GET(request: Request) {
     return createUnauthorizedResponse();
   }
 
-  await ensureReportAnalysisRecovery();
   const { searchParams } = new URL(request.url);
   const cursor = searchParams.get("cursor");
   const requestedLimit = Number.parseInt(searchParams.get("limit") || "", 10);
@@ -53,10 +52,23 @@ export async function POST(request: Request) {
 
   const formData = await request.formData();
   const file = formData.get("file");
+  const modelId = formData.get("modelId");
 
   if (!(file instanceof File)) {
     await logger.warn("上传报告失败：缺少文件", {});
     return NextResponse.json({ error: "请上传 PDF 文件。" }, { status: 400 });
+  }
+
+  const selectedModel =
+    typeof modelId === "string" && modelId.trim()
+      ? findAiModelOptionById(modelId.trim())
+      : null;
+
+  if (typeof modelId === "string" && modelId.trim() && !selectedModel) {
+    return NextResponse.json(
+      { error: "所选模型无效，请重新选择。" },
+      { status: 400 },
+    );
   }
 
   const isPdf =
@@ -101,29 +113,34 @@ export async function POST(request: Request) {
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const report = await uploadQueue.enqueue(`upload:${file.name}:${Date.now()}`, async () => {
-    await logger.info("上传任务开始执行", {
-      fileName: file.name,
-      fileSize: file.size,
-      queue: uploadQueue.getStats(),
-    });
+  const report = await uploadQueue.enqueue(
+    `upload:${file.name}:${Date.now()}`,
+    async () => {
+      await logger.info("上传任务开始执行", {
+        fileName: file.name,
+        fileSize: file.size,
+        queue: uploadQueue.getStats(),
+      });
 
-    const createdReport = await createStoredReport({
-      userId: auth.user.id,
-      fileName: file.name,
-      mimeType: file.type || "application/pdf",
-      fileSize: file.size,
-      bytes,
-    });
+      const createdReport = await createStoredReport({
+        userId: auth.user.id,
+        fileName: file.name,
+        mimeType: file.type || "application/pdf",
+        fileSize: file.size,
+        bytes,
+        requestedProvider: selectedModel?.provider || null,
+        requestedModel: selectedModel?.model || null,
+      });
 
-    await logger.info("上传任务执行完成", {
-      reportId: createdReport.id,
-      fileName: file.name,
-      queue: uploadQueue.getStats(),
-    });
+      await logger.info("上传任务执行完成", {
+        reportId: createdReport.id,
+        fileName: file.name,
+        queue: uploadQueue.getStats(),
+      });
 
-    return createdReport;
-  });
+      return createdReport;
+    },
+  );
 
   await logger.info("报告上传成功", {
     reportId: report.id,
@@ -166,7 +183,10 @@ export async function DELETE(request: Request) {
       reportId: id,
       error,
     });
-    return NextResponse.json({ error: "报告不存在或删除失败。" }, { status: 404 });
+    return NextResponse.json(
+      { error: "报告不存在或删除失败。" },
+      { status: 404 },
+    );
   }
 
   await logger.info("报告删除成功", { reportId: id });

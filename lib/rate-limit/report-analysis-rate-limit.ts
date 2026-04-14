@@ -29,6 +29,7 @@ const unitMs: Record<string, number> = {
 
 let database: DatabaseSync | null = null;
 let parsedRulesCache: { raw: string; rules: RateLimitRule[] } | null = null;
+let parsedWhitelistCache: { raw: string; userIds: Set<string> } | null = null;
 
 function getSqlitePath() {
   return getSqliteDatabasePath();
@@ -106,6 +107,32 @@ function getRateLimitRules() {
   return parseRateLimitRules(process.env.REPORT_ANALYSIS_RATE_LIMITS || "");
 }
 
+function parseWhitelistUserIds(raw: string) {
+  const normalized = raw.trim();
+  if (parsedWhitelistCache && parsedWhitelistCache.raw === normalized) {
+    return parsedWhitelistCache.userIds;
+  }
+
+  const userIds = new Set(
+    normalized
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+  parsedWhitelistCache = {
+    raw: normalized,
+    userIds,
+  };
+  return userIds;
+}
+
+function isRateLimitBypassedUser(userId: string) {
+  const whitelistUserIds = parseWhitelistUserIds(
+    process.env.REPORT_ANALYSIS_RATE_LIMIT_WHITELIST_USER_IDS || "",
+  );
+  return whitelistUserIds.has(userId);
+}
+
 function formatDurationLabel(seconds: number) {
   if (seconds < 60) {
     return `${seconds} 秒`;
@@ -173,6 +200,10 @@ export function buildReportAnalysisRateLimitMessage(result: Extract<ConsumeResul
 }
 
 export function consumeReportAnalysisQuota(userId: string): ConsumeResult {
+  if (isRateLimitBypassedUser(userId)) {
+    return { ok: true };
+  }
+
   const rules = getRateLimitRules();
   if (rules.length === 0) {
     return { ok: true };

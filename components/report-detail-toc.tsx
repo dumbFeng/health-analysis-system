@@ -129,7 +129,7 @@ export function ReportDetailToc({ sectionLinks }: ReportDetailTocProps) {
 
   return (
     <>
-      <div className="fixed top-1/2 left-3 z-40 -translate-y-1/2 xl:hidden">
+      <div className="fixed right-4 bottom-5 z-40 xl:hidden">
         <div className="glass flex items-center gap-2 rounded-[1.4rem] p-2 shadow-[0_18px_40px_rgba(41,37,36,0.18)]">
           <button
             type="button"
@@ -138,7 +138,7 @@ export function ReportDetailToc({ sectionLinks }: ReportDetailTocProps) {
             onClick={() => {
               setIsMobileOpen((current) => !current);
             }}
-            className="flex min-h-11 items-center justify-center rounded-[1rem] bg-[rgba(13,122,95,0.12)] px-3 text-xs font-medium tracking-[0.12em] text-emerald-900 uppercase"
+            className="flex min-h-11 min-w-14 items-center justify-center rounded-[1rem] bg-[rgba(13,122,95,0.12)] px-3 text-xs font-medium tracking-[0.12em] text-emerald-900 uppercase"
           >
             目录
           </button>

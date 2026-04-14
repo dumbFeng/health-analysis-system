@@ -230,7 +230,6 @@ export function LoginForm({
   function finishLogin() {
     closeInviteModal();
     router.replace(nextPath);
-    router.refresh();
   }
 
   async function requestEmailCode() {

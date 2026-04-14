@@ -89,6 +89,8 @@ export async function createStoredReport(input: {
   mimeType: string;
   fileSize: number;
   bytes: Uint8Array;
+  requestedProvider: string | null;
+  requestedModel: string | null;
 }) {
   const id = randomUUID();
   const createdAt = new Date();
@@ -123,6 +125,8 @@ export async function createStoredReport(input: {
       createdAt: createdAt.toISOString(),
       updatedAt: createdAt.toISOString(),
       status: "analyzing",
+      requestedProvider: input.requestedProvider,
+      requestedModel: input.requestedModel,
     });
   } catch (error) {
     await deleteStoredFile(sourceFileKey, "upload");
@@ -185,6 +189,14 @@ export async function listReports(userId?: string) {
   return repository.list(userId);
 }
 
+export async function listReportIdsByStatus(
+  status: StoredReport["status"],
+  userId?: string,
+) {
+  const repository = await getRepository();
+  return repository.listIdsByStatus(status, userId);
+}
+
 export async function listReportsPage(input: {
   userId?: string;
   cursor?: string | null;
@@ -192,31 +204,11 @@ export async function listReportsPage(input: {
 }): Promise<PublicReportListPage & { summary: ReportListSummary }> {
   const repository = await getRepository();
   const page = await repository.listPage(input);
-
-  await Promise.all(
-    page.reports.map(async (report) => {
-      if (report.status !== "succeeded") {
-        return;
-      }
-
-      const hydrated = await hydrateReportAnalysis(report);
-      if (
-        hydrated.analysis &&
-        (report.analysisModel !== hydrated.analysis.model ||
-          report.overallRiskLevel !== hydrated.analysis.executiveSummary.overallRiskLevel ||
-          report.riskScore !== hydrated.analysis.executiveSummary.riskScore)
-      ) {
-        await saveReport(hydrated);
-      }
-    }),
-  );
-
-  const refreshedPage = await repository.listPage(input);
   const summary = await repository.getSummary(input.userId);
   return {
-    reports: refreshedPage.reports.map(toPublicReport),
-    nextCursor: refreshedPage.nextCursor,
-    hasMore: refreshedPage.hasMore,
+    reports: page.reports.map(toPublicReport),
+    nextCursor: page.nextCursor,
+    hasMore: page.hasMore,
     summary,
   };
 }

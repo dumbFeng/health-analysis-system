@@ -22,8 +22,32 @@ export const uploadQueue = new TaskQueue(
   uploadCap,
 );
 
-export const analysisQueue = new TaskQueue(
-  "report-analysis",
-  analysisConcurrency,
-  analysisCap,
-);
+const analysisQueuesByProvider = new Map<string, TaskQueue>();
+
+function normalizeProviderQueueKey(provider: string | null | undefined) {
+  const normalized = (provider || "default").trim().toLowerCase();
+  return normalized || "default";
+}
+
+export function getAnalysisQueueByProvider(provider: string | null | undefined) {
+  const key = normalizeProviderQueueKey(provider);
+  const existing = analysisQueuesByProvider.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const created = new TaskQueue(
+    `report-analysis:${key}`,
+    analysisConcurrency,
+    analysisCap,
+  );
+  analysisQueuesByProvider.set(key, created);
+  return created;
+}
+
+export function getAllAnalysisQueueStats() {
+  return Array.from(analysisQueuesByProvider.entries()).map(([provider, queue]) => ({
+    provider,
+    ...queue.getStats(),
+  }));
+}
