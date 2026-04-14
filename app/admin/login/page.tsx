@@ -14,6 +14,18 @@ function sanitizeNextPath(value: string | undefined) {
   return value;
 }
 
+function resolveLoginErrorMessage(error: string | undefined) {
+  if (!error) {
+    return "";
+  }
+
+  if (error === "admin_required") {
+    return "请使用管理员账号登录";
+  }
+
+  return error;
+}
+
 export default async function AdminLoginPage({
   searchParams,
 }: {
@@ -22,15 +34,18 @@ export default async function AdminLoginPage({
   const auth = await getCurrentAuthFromCookies();
   const { next, error, inviteCode } = await searchParams;
   const nextPath = sanitizeNextPath(next);
+  const initialMessage = resolveLoginErrorMessage(error);
 
   if (auth) {
-    redirect(isAdminUser(auth.user) ? nextPath : "/");
+    if (isAdminUser(auth.user)) {
+      redirect(nextPath);
+    }
   }
 
   return (
     <LoginForm
       nextPath={nextPath}
-      initialMessage={error}
+      initialMessage={initialMessage}
       initialInviteCode={typeof inviteCode === "string" ? inviteCode : ""}
       mode="admin"
     />

@@ -18,7 +18,7 @@ export default async function AdminProtectedLayout({
   }
 
   if (!isAdminUser(auth.user)) {
-    redirect("/");
+    redirect("/admin/login?error=admin_required");
   }
 
   return (
